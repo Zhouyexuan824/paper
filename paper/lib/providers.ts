@@ -195,7 +195,7 @@ async function pooled<T, R>(
   worker: (item: T) => Promise<R>,
   concurrency = 3,
 ) {
-  const out: PromiseSettledResult<R>[] = new Array(items.length);
+  const out: PromiseSettledResult<R>[] = Array.from({ length: items.length });
   let cursor = 0;
   await Promise.all(
     Array.from({ length: Math.min(concurrency, items.length) }, async () => {
@@ -391,7 +391,7 @@ export function createSources(load: Loader) {
     throw Error('无效的论文标识，请重新检索并选择论文');
   }
   async function hydrate(n: PaperNode): Promise<PaperNode> {
-    let next = { ...n };
+    const next = { ...n };
     const merge = (p: PaperNode) => {
       for (const [k, v] of Object.entries(p))
         if (v && (!(next as any)[k] || k === 'referenceIds'))

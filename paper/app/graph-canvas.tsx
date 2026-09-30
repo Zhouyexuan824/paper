@@ -12,7 +12,6 @@ import { Button } from '@/components/ui/button';
 import {
   kindNames,
   type Graph,
-  type PaperNode,
   type GraphEdge,
   type NodeKind,
 } from '@/lib/model';

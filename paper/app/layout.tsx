@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
+import './paperline.css';
 
 const geistSans = Geist({
   variable: '--font-geist-sans',
@@ -13,8 +14,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: 'Paper Atlas · 论文关系网',
-  description: '探索论文、方法与实验之间的关系，积累你自己的研究图谱。',
+  title: 'Paperline Atlas · 智能论文脉络与关系图谱',
+  description: '从论文检索与脉络整理开始，积累可编辑、可扩展的个人研究图谱。',
   icons: { icon: '/favicon.svg' },
 };
 

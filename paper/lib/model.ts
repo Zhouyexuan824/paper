@@ -29,6 +29,8 @@ export interface PaperNode {
   title: string;
   kind: NodeKind;
   year?: number;
+  venue?: string;
+  citedBy?: number;
   abstract?: string;
   summary?: string;
   url?: string;

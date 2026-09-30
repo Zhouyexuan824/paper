@@ -49,6 +49,7 @@ import GraphCanvas from './graph-canvas';
 import ResearchBriefPanel from './research-brief';
 import type { RelationScope } from '@/lib/graph-view';
 import ExpansionResult, { type ExpansionReport } from './expansion-report';
+import PaperlineView from './paperline-view';
 async function request(path: string, body?: unknown, method = 'POST') {
   const res = await fetch(
     '/api/' + path,
@@ -139,6 +140,7 @@ function Pick({
   );
 }
 export default function Workspace() {
+  const [mode, setMode] = useState<'lineage' | 'graph'>('lineage');
   const [graph, setGraph] = useState<Graph>(seed),
     [selected, setSelected] = useState('arxiv:2505.23214'),
     [focus, setFocus] = useState<string | null>('arxiv:2505.23214');
@@ -260,6 +262,15 @@ export default function Workspace() {
       throw e;
     } finally {
       setBusy('');
+    }
+  }
+  async function organizePaper(p: PaperNode) {
+    try {
+      const id = await addPaper(p);
+      setMode('lineage');
+      await exploreCenter(id);
+    } catch {
+      // addPaper/exploreCenter already surface the actionable error.
     }
   }
   async function analyze(id = selected) {
@@ -663,12 +674,16 @@ export default function Workspace() {
           <span className="brand-mark">
             <Network size={23} />
           </span>
-          <b>Paper Atlas</b>
-          <span className="version">研究工作台</span>
+          <b>Paperline Atlas</b>
+          <span className="version">智能论文脉络与关系图谱</span>
         </div>
-        <div className="topnote">
-          <span className="live-dot" />
-          {ready ? '个人图谱已连接' : 'SAMamba 示例图谱'}
+        <div className="workspace-switch" aria-label="工作区视图">
+          <button className={mode === 'lineage' ? 'active' : ''} onClick={() => setMode('lineage')}>
+            <Sparkles size={15} /> 智能整理
+          </button>
+          <button className={mode === 'graph' ? 'active' : ''} onClick={() => setMode('graph')}>
+            <Network size={15} /> 关系图谱
+          </button>
         </div>
         <Button
           variant="ghost"
@@ -717,6 +732,31 @@ export default function Workspace() {
           )}
         </div>
       )}
+      {mode === 'lineage' ? (
+        <PaperlineView
+          graph={graph}
+          node={node}
+          query={query}
+          results={results}
+          searched={searched}
+          searching={searching}
+          warning={searchWarn}
+          busy={!!busy}
+          ready={ready}
+          ai={ai}
+          aiProvider={aiProvider}
+          onQuery={setQuery}
+          onSearch={() => void doSearch()}
+          onOrganize={(paper) => void organizePaper(paper)}
+          onAdd={(paper) => void addPaper(paper).catch(() => {})}
+          onVisit={(id) => visit(id)}
+          onExplore={(id) => void exploreCenter(id)}
+          onGraph={(id) => {
+            if (id) visit(id);
+            setMode('graph');
+          }}
+        />
+      ) : (
       <div
         className={
           'workspace ' + (busy || notice || login ? 'with-status' : '')
@@ -1130,6 +1170,7 @@ export default function Workspace() {
           )}
         </aside>
       </div>
+      )}
       <Dialog open={searchOpen} onOpenChange={setSearchOpen}>
         <DialogContent className="search-dialog">
           <DialogHeader>

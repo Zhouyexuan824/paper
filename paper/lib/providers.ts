@@ -89,6 +89,7 @@ export function fromArxiv(e: any): PaperNode {
     title,
     arxiv: id,
     year: Number(str(e.published).slice(0, 4)) || undefined,
+    venue: 'arXiv',
     abstract,
     authors: arr(e.author).map((a) => str(a.name)),
     url: 'https://arxiv.org/abs/' + id,
@@ -129,6 +130,11 @@ export function fromOpenAlex(w: any): PaperNode {
     title,
     kind: 'paper',
     year: w.publication_year,
+    venue:
+      w.primary_location?.source?.display_name ||
+      w.best_oa_location?.source?.display_name ||
+      undefined,
+    citedBy: Number(w.cited_by_count) || undefined,
     doi,
     arxiv: arxivMatch?.[1],
     openalex: w.id?.split('/').pop(),
@@ -152,6 +158,8 @@ export function fromCrossref(w: any): PaperNode {
     kind: 'paper',
     doi,
     year: w.published?.['date-parts']?.[0]?.[0],
+    venue: arr(w['container-title'])[0] || undefined,
+    citedBy: Number(w['is-referenced-by-count']) || undefined,
     abstract: plain(w.abstract || ''),
     authors: (w.author || []).map((a: any) =>
       [a.given, a.family].filter(Boolean).join(' '),
@@ -177,6 +185,8 @@ export function fromSemantic(w: any): PaperNode {
     doi,
     semantic: w.paperId,
     year: w.year,
+    venue: w.venue || undefined,
+    citedBy: Number(w.citationCount) || undefined,
     abstract: w.abstract || '',
     authors: (w.authors || []).map((a: any) => a.name),
     url: url(
@@ -320,7 +330,7 @@ export function createSources(load: Loader) {
       (n.arxiv ? 'ARXIV:' + n.arxiv : n.doi ? 'DOI:' + n.doi : '');
     if (!id) throw Error('缺少可检索的论文标识');
     const fields =
-      'title,year,abstract,externalIds,authors,url,references.title,references.year,references.externalIds,citations.title,citations.year,citations.externalIds';
+      'title,year,venue,citationCount,abstract,externalIds,authors,url,references.title,references.year,references.externalIds,citations.title,citations.year,citations.externalIds';
     return load(
       'https://api.semanticscholar.org/graph/v1/paper/' +
         encodeURIComponent(id) +

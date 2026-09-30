@@ -1,0 +1,17 @@
+import assert from 'node:assert/strict';
+import { validateResearch } from '../lib/research.ts';
+const center={id:'root',kind:'paper',title:'Root',abstract:'We combine hierarchical image features with selective state space modeling for infrared small target detection.'};
+const candidate={id:'real',kind:'paper',title:'Retrieved paper',abstract:'Our method models long range dependencies using a selective state space model.'};
+const good={id:'real',role:'技术关联',reason:'Compare state space mechanisms',difference:'Different tasks',question:'Can the state update transfer?',centerEvidence:'selective state space modeling',targetEvidence:'long range dependencies using a selective state space model'};
+const raw={problem:'small target detection',approach:'image and state modeling',reading:[good,{...good,id:'invented'},{...good,id:'second',targetEvidence:'hallucinated quotation'}]};
+const result=validateResearch(raw,center,[candidate,{...candidate,id:'second'}],'research goal','fixture');
+assert.equal(result.brief.reading.length,1);
+assert.equal(result.rejected,2);
+assert.equal(result.brief.goal,'research goal');
+assert.equal(validateResearch({...raw,reading:[{...good,role:'直接 baseline'}]},center,[candidate],'','fixture').brief.reading.length,0,'unproven baseline disallowed');
+assert.equal(validateResearch({...raw,reading:[{...good,centerEvidence:'not in the center abstract'}]},center,[candidate],'','fixture').brief.reading.length,0);
+assert.equal(validateResearch({...raw,reading:[good]},center,[{...candidate,abstract:''}],'','fixture').brief.reading.length,0,'title alone is not evidence');
+assert.equal(validateResearch({...raw,reading:[{...good,centerEvidence:'CSI'}]},{id:'csi',kind:'method',title:'CSI'},[candidate],'','fixture').brief.reading.length,1,'short concepts use exact titles');
+assert.equal(validateResearch({...raw,reading:[null,'garbage']},center,[candidate],'','fixture').brief.reading.length,0);
+console.log('PASS: retrieved IDs only, dual abstract quotes, no unsupported baseline, title-only exclusions, short concepts, malformed items');
+assert.equal(validateResearch({...raw,reading:[{...good,role:'后续工作候选'}]},{...center,year:2025},[{...candidate,year:2020}],'','fixture').brief.reading.length,0,'older work is not later work');

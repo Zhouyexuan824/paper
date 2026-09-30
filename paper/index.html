@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f6f9ff">
+  <title>Paperline — 论文脉络整理器</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;600;700&family=Noto+Sans+SC:wght@400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <a class="brand" href="/"><span class="brand-mark">P.</span><span>paperline</span></a>
+      <button class="nav-item active"><span class="nav-icon">⌕</span> 论文整理</button>
+      <div class="side-label library-label">数据来源</div>
+      <div class="library-note">OpenAlex · DeepSeek</div>
+      <div class="sidebar-bottom"><div class="avatar">PL</div><div><strong>论文研究助手</strong><span>本地工作区</span></div></div>
+    </aside>
+
+    <main class="main-content">
+      <header class="topbar"><div class="breadcrumb"><strong>论文整理器</strong></div><div class="top-right"><span class="status"><i></i> 正在检查</span><button class="help-button" title="关于数据来源">?</button></div></header>
+      <section class="hero">
+        <h1>论文整理器</h1>
+        <form id="search-form" class="search-form">
+          <span class="search-glyph">⌕</span>
+          <input id="paper-title" name="title" autocomplete="off" placeholder="输入论文标题，例如 SpikYOLO" required maxlength="300">
+          <button id="search-button" type="submit"><span>开始整理</span><span class="button-arrow">↗</span></button>
+        </form>
+        <div class="search-hint">可输入论文全名或常用简称 · 例如 <button class="example" type="button">SpikYOLO</button></div>
+      </section>
+
+      <section id="progress" class="progress-panel hidden" aria-live="polite">
+        <div class="spinner"></div><div><strong>正在追踪论文脉络</strong><span id="progress-text">搜索论文与引用关系…</span></div><span class="progress-step">01 — 03</span>
+      </section>
+
+      <section id="results" class="results hidden"></section>
+      <footer><span>论文元数据：OpenAlex</span><span>刊会等级注明对应目录与年份</span></footer>
+    </main>
+  </div>
+  <div id="toast" class="toast hidden" role="alert"></div>
+  <script src="/app.js" defer></script>
+</body>
+</html>
+

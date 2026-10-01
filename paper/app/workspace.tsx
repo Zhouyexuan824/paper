@@ -140,7 +140,9 @@ function Pick({
   );
 }
 export default function Workspace() {
-  const [mode, setMode] = useState<'lineage' | 'graph'>('lineage');
+  const [mode, setMode] = useState<'lineage' | 'graph'>('graph');
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [graph, setGraph] = useState<Graph>(seed),
     [selected, setSelected] = useState('arxiv:2505.23214'),
     [focus, setFocus] = useState<string | null>('arxiv:2505.23214');
@@ -185,6 +187,15 @@ export default function Workspace() {
     );
     return () => clearInterval(timer);
   }, [busy]);
+  useEffect(() => {
+    const closePanels = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setLibraryOpen(false);
+      setDetailsOpen(false);
+    };
+    window.addEventListener('keydown', closePanels);
+    return () => window.removeEventListener('keydown', closePanels);
+  }, []);
   const graphRef = useRef(graph);
   graphRef.current = graph;
   const searchSeq = useRef(0);
@@ -205,6 +216,13 @@ export default function Workspace() {
     try {
       const data = await request('graph');
       setGraph(data);
+      const ids = new Set<string>(data.nodes.map((item: PaperNode) => item.id));
+      if (!ids.has(selectedRef.current)) {
+        const fallback = data.nodes[0]?.id || '';
+        selectedRef.current = fallback;
+        setSelected(fallback);
+        setFocus(fallback || null);
+      }
       setAi(data.aiConfigured);
       setAiProvider(data.aiProvider || 'AI');
       setReady(true);
@@ -426,6 +444,7 @@ export default function Workspace() {
     setFocus(id);
     setSuggestions([]);
     setConnecting(false);
+    setDetailsOpen(true);
   }
   function back() {
     const previous = trail.at(-1);
@@ -669,7 +688,7 @@ export default function Workspace() {
   }, [commit]);
   return (
     <div className="atlas">
-      <header className="topbar">
+      <header className={'topbar ' + (mode === 'graph' ? 'graph-topbar' : '')}>
         <div className="brand">
           <span className="brand-mark">
             <Network size={23} />
@@ -759,10 +778,20 @@ export default function Workspace() {
       ) : (
       <div
         className={
-          'workspace ' + (busy || notice || login ? 'with-status' : '')
+          'workspace graph-workspace ' +
+          (libraryOpen ? 'library-open ' : '') +
+          (detailsOpen ? 'details-open ' : '') +
+          (busy || notice || login ? 'with-status' : '')
         }
       >
-        <aside className="library">
+        <aside
+          id="paper-library-panel"
+          className="library"
+          aria-label="论文库"
+          aria-hidden={!libraryOpen}
+          inert={libraryOpen ? undefined : true}
+        >
+          <button className="panel-close" onClick={() => setLibraryOpen(false)} aria-label="关闭论文库">×</button>
           <div className="eyebrow">MY LIBRARY</div>
           <h2>我的研究</h2>
           <div className="search-box">
@@ -824,23 +853,54 @@ export default function Workspace() {
             <div>
               <div className="eyebrow">RESEARCH CONSTELLATION</div>
               <h1>
-                {focus
+                {!ready
+                  ? '正在载入你的论文星图'
+                  : focus
                   ? (graph.nodes.find((n) => n.id === focus)?.label || '论文') +
                     ' 的关系网'
                   : '全部研究关系'}
                 <span>
-                  {focus
-                    ? graph.edges.filter(
-                        (e) => e.source === focus || e.target === focus,
-                      ).length + ' 条直接关系 · 收藏共 '
-                    : '收藏共 '}
-                  {graph.nodes.length} 个节点 · {graph.edges.length} 条关系 ·{' '}
-                  {graph.edges.filter((e) => e.status === 'candidate').length}{' '}
-                  条待核验
+                  {!ready ? (
+                    '正在读取已保存的论文、关系和笔记…'
+                  ) : (
+                    <>
+                      {focus
+                        ? graph.edges.filter(
+                            (e) => e.source === focus || e.target === focus,
+                          ).length + ' 条直接关系 · 收藏共 '
+                        : '收藏共 '}
+                      {graph.nodes.length} 个节点 · {graph.edges.length} 条关系 ·{' '}
+                      {
+                        graph.edges.filter((e) => e.status === 'candidate')
+                          .length
+                      }{' '}
+                      条待核验
+                    </>
+                  )}
                 </span>
               </h1>
             </div>
             <div className="heading-actions">
+              <Button
+                variant="outline"
+                onClick={() => setLibraryOpen((open) => !open)}
+                title={libraryOpen ? '关闭论文库' : '打开论文库'}
+                aria-expanded={libraryOpen}
+                aria-controls="paper-library-panel"
+              >
+                <BookOpen />
+                论文库
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setDetailsOpen((open) => !open)}
+                title={detailsOpen ? '关闭节点信息' : '打开节点信息'}
+                aria-expanded={detailsOpen}
+                aria-controls="node-details-panel"
+              >
+                <FileText />
+                节点信息
+              </Button>
               <Button
                 variant="outline"
                 onClick={back}
@@ -884,25 +944,40 @@ export default function Workspace() {
               </Button>
             </div>
           </div>
-          <GraphCanvas
-            key={viewRevision}
-            graph={graph}
-            preferredScope={viewScope}
-            selected={selected}
-            focus={focus}
-            connecting={connecting}
-            onSelect={choose}
-            onEdge={(e) => {
-              setEdgeDraft({ ...e });
-              setEdgeOpen(true);
-              setDeletePending(false);
-            }}
-            onMove={move}
-            onConnect={() => ready && setConnecting((c) => !c)}
-            onReset={() => setFocus(null)}
-          />
+          {ready ? (
+            <GraphCanvas
+              key={viewRevision}
+              graph={graph}
+              preferredScope={viewScope}
+              selected={selected}
+              focus={focus}
+              connecting={connecting}
+              onSelect={choose}
+              onEdge={(e) => {
+                setEdgeDraft({ ...e });
+                setEdgeOpen(true);
+                setDeletePending(false);
+              }}
+              onMove={move}
+              onConnect={() => ready && setConnecting((c) => !c)}
+              onReset={() => setFocus(null)}
+            />
+          ) : (
+            <div className="personal-graph-loading" role="status">
+              <LoaderCircle className="spin" />
+              <strong>正在载入你的论文星图</strong>
+              <span>正在读取已保存的论文、关系和笔记…</span>
+            </div>
+          )}
         </main>
-        <aside className="details">
+        <aside
+          id="node-details-panel"
+          className="details"
+          aria-label="节点信息"
+          aria-hidden={!detailsOpen}
+          inert={detailsOpen ? undefined : true}
+        >
+          <button className="panel-close" onClick={() => setDetailsOpen(false)} aria-label="关闭节点信息">×</button>
           {node && (
             <>
               <div className="detail-top">
@@ -936,11 +1011,11 @@ export default function Workspace() {
                 disabled={!ready || !!busy || !ai}
               >
                 <Sparkles />
-                分析研究脉络
+                以此节点为中心 · AI 扩展
               </Button>
               <p className="center-hint">
                 {ai
-                  ? '解释方法来源、比较论文差异，给出阅读顺序和待核验问题。'
+                  ? '自动查找基础方法、平行工作和后续论文，并绘制到当前星图。'
                   : 'AI 暂未连接，仍可展开引用或手动建立关系。'}
               </p>
               {node.kind === 'paper' ? (
@@ -1014,7 +1089,7 @@ export default function Workspace() {
                     <div className="research-empty">
                       <strong>让图谱回答研究问题</strong>
                       <p>
-                        点击“分析研究脉络”，获取这篇论文的技术路线、值得对照的论文及具体阅读问题。
+                        点击“以此节点为中心 · AI 扩展”，获取这篇论文的技术路线、值得对照的论文及具体阅读问题。
                       </p>
                     </div>
                   )}

@@ -47,6 +47,14 @@ type StarLink = GraphEdge & {
   source: string | StarNode;
   target: string | StarNode;
 };
+type RelationFamily =
+  | 'citation'
+  | 'method'
+  | 'field'
+  | 'dataset'
+  | 'comparison'
+  | 'related'
+  | 'custom';
 
 const colors: Record<NodeKind, string> = {
   paper: '#70a7ff',
@@ -83,6 +91,90 @@ const stableDepth = (id: string) => {
     hash = (hash * 31 + id.charCodeAt(index)) | 0;
   return ((Math.abs(hash) % 13) - 6) * 2.1;
 };
+const relationMeta: Record<
+  RelationFamily,
+  { label: string; symbol: string; color: string; background: string }
+> = {
+  citation: {
+    label: '引用',
+    symbol: '↗',
+    color: '#87b5f4',
+    background: 'rgba(25, 64, 116, .86)',
+  },
+  method: {
+    label: '方法',
+    symbol: '◆',
+    color: '#c6a4f6',
+    background: 'rgba(67, 43, 108, .88)',
+  },
+  field: {
+    label: '领域',
+    symbol: '⬢',
+    color: '#6bd6c5',
+    background: 'rgba(20, 84, 77, .88)',
+  },
+  dataset: {
+    label: '数据集',
+    symbol: '■',
+    color: '#f0c77b',
+    background: 'rgba(102, 73, 27, .88)',
+  },
+  comparison: {
+    label: '对比',
+    symbol: '⇄',
+    color: '#e69aa3',
+    background: 'rgba(102, 48, 62, .88)',
+  },
+  related: {
+    label: '相关',
+    symbol: '≈',
+    color: '#85c9d9',
+    background: 'rgba(24, 72, 88, .88)',
+  },
+  custom: {
+    label: '自定义',
+    symbol: '✎',
+    color: '#afbdd2',
+    background: 'rgba(51, 62, 82, .88)',
+  },
+};
+const nodeId = (value: string | StarNode) =>
+  typeof value === 'string' ? value : value.id;
+const relationFamily = (link: StarLink): RelationFamily => {
+  if (link.type === '引用') return 'citation';
+  if (link.type === '研究领域') return 'field';
+  if (link.type === '实验数据集') return 'dataset';
+  if (['对比方法', '直接 baseline', '同任务方法'].includes(link.type))
+    return 'comparison';
+  if (
+    ['使用方法', '提出模块', '方法借鉴', '技术关联', '可借鉴方法'].includes(
+      link.type,
+    )
+  )
+    return 'method';
+  if (link.type === '自定义') return 'custom';
+  return 'related';
+};
+const relationBadge = (link: StarLink, focus: string | null) => {
+  const family = relationFamily(link);
+  const statusMark =
+    link.status === 'candidate' ? '?' : link.status === 'manual' ? '✎' : '✓';
+  let label = link.type;
+  if (link.type === '引用' && focus) {
+    if (nodeId(link.source) === focus) label = '参考';
+    if (nodeId(link.target) === focus) label = '被引用';
+  } else {
+    label =
+      {
+        研究领域: '领域',
+        实验数据集: '数据集',
+        '直接 baseline': 'Baseline',
+        后续工作候选: '后续候选',
+      }[link.type] || link.type;
+  }
+  const symbol = relationMeta[family].symbol;
+  return `${statusMark === symbol ? symbol : `${statusMark} ${symbol}`} ${label}`;
+};
 
 export default function GraphCanvas({
   graph,
@@ -95,6 +187,7 @@ export default function GraphCanvas({
   onEdge,
   onMove,
   onConnect,
+  onFocusSelected,
   onReset,
 }: {
   graph: Graph;
@@ -107,6 +200,7 @@ export default function GraphCanvas({
   onEdge: (edge: GraphEdge) => void;
   onMove: (id: string, x: number, y: number) => void;
   onConnect: () => void;
+  onFocusSelected: () => void;
   onReset: () => void;
 }) {
   const shell = useRef<HTMLDivElement>(null);
@@ -123,10 +217,11 @@ export default function GraphCanvas({
   const [confirmed, setConfirmed] = useState(false);
   const [hidden, setHidden] = useState<NodeKind[]>([]);
   const [limit, setLimit] = useState(42);
-  const [hovered, setHovered] = useState('');
+  const hover = useRef({ node: '', link: '' });
   const [guide, setGuide] = useState(true);
   const [orbiting, setOrbiting] = useState(false);
   const [effects, setEffects] = useState(true);
+  const effectsRef = useRef(effects);
   const fitPadding = Math.min(52, Math.max(36, Math.round(size.width * 0.04)));
   const researchStamp = graph.nodes.find((node) => node.id === focus)?.research
     ?.generatedAt;
@@ -180,6 +275,10 @@ export default function GraphCanvas({
   }, []);
 
   useEffect(() => {
+    effectsRef.current = effects;
+  }, [effects]);
+
+  useEffect(() => {
     setLimit(42);
     setScope(focus ? preferredScope : 'all');
   }, [focus, researchStamp, preferredScope]);
@@ -196,7 +295,9 @@ export default function GraphCanvas({
       y:
         node.id === focus ? 0 : node.y == null ? undefined : (node.y - 370) / 9,
       z: node.id === focus ? 0 : stableDepth(node.id),
-      ...(node.id === focus ? { fx: 0, fy: 0, fz: 0 } : {}),
+      ...(node.id === focus
+        ? { fx: 0, fy: 0, fz: 0 }
+        : { fz: stableDepth(node.id) }),
     }));
     const links: StarLink[] = visible.graph.edges.map((edge) => ({
       ...edge,
@@ -205,18 +306,70 @@ export default function GraphCanvas({
     }));
     return { nodes, links };
   }, [visible.graph, focus]);
+  const autoFitPadding =
+    graphData.nodes.length <= 3
+      ? size.width < 600
+        ? 90
+        : 150
+      : size.width < 600
+        ? Math.max(fitPadding, 58)
+        : fitPadding;
+  const lens = useMemo(() => {
+    const nodeIds = new Set<string>(selected ? [selected] : []);
+    const edgeIds = new Set<string>();
+    const counts = new Map<RelationFamily, number>();
+    graphData.links.forEach((link) => {
+      const source = nodeId(link.source);
+      const target = nodeId(link.target);
+      if (source !== selected && target !== selected) return;
+      nodeIds.add(source);
+      nodeIds.add(target);
+      edgeIds.add(link.id);
+      const family = relationFamily(link);
+      counts.set(family, (counts.get(family) || 0) + 1);
+    });
+    return { nodeIds, edgeIds, counts };
+  }, [graphData.links, selected]);
+  const lensActive =
+    !focus &&
+    !!selected &&
+    graphData.nodes.length > 1 &&
+    graphData.nodes.some((node) => node.id === selected);
+  const labeledLinkCount = lensActive
+    ? lens.edgeIds.size
+    : graphData.links.length;
+  const relationLabelBudget = size.width < 640 ? 4 : 10;
+  const showRelationLabels =
+    labeledLinkCount > 0 && labeledLinkCount <= relationLabelBudget;
+  const selectedNode = graphData.nodes.find((node) => node.id === selected);
+  const lensCounts = [...lens.counts.entries()].sort((a, b) => b[1] - a[1]);
+  const labeledNodeIds = useMemo(() => {
+    const budget = size.width < 640 ? 14 : 30;
+    const priority = graphData.nodes.filter(
+      (node) =>
+        node.id === selected ||
+        node.id === focus ||
+        (lensActive && lens.nodeIds.has(node.id)),
+    );
+    const remaining = graphData.nodes.filter(
+      (node) => !priority.some((item) => item.id === node.id),
+    );
+    return new Set(
+      [...priority, ...remaining].slice(0, budget).map((node) => node.id),
+    );
+  }, [focus, graphData.nodes, lens.nodeIds, lensActive, selected, size.width]);
 
   const focusNode = useCallback(
     (node: StarNode, duration = 900) => {
       if (!force.current || node.x == null || node.y == null || node.z == null)
         return;
-      const length = Math.hypot(node.x, node.y, node.z) || 1;
-      const distance = size.width < 600 ? 165 : 105;
-      const ratio = 1 + distance / length;
+      const distance = size.width < 600 ? 240 : 210;
       force.current.cameraPosition(
-        length < 4
-          ? { x: 0, y: 0, z: distance }
-          : { x: node.x * ratio, y: node.y * ratio, z: node.z * ratio },
+        {
+          x: node.x + distance * 0.22,
+          y: node.y + distance * 0.1,
+          z: node.z + distance,
+        },
         { x: node.x, y: node.y, z: node.z },
         duration,
       );
@@ -232,10 +385,7 @@ export default function GraphCanvas({
         focusNode(graphData.nodes[0], 420);
         return;
       }
-      force.current?.zoomToFit?.(
-        520,
-        size.width < 600 ? Math.max(fitPadding, 58) : fitPadding,
-      );
+      force.current?.zoomToFit?.(520, autoFitPadding);
     }, 240);
     return () => window.clearTimeout(timer);
   }, [
@@ -243,6 +393,7 @@ export default function GraphCanvas({
     size.width,
     size.height,
     fitPadding,
+    autoFitPadding,
     focusNode,
     graphData.nodes,
   ]);
@@ -253,10 +404,10 @@ export default function GraphCanvas({
         ? graphData.nodes.find((item) => item.id === focus)
         : undefined;
       if (node) focusNode(node, 520);
-      else force.current?.zoomToFit?.(520, fitPadding);
+      else force.current?.zoomToFit?.(520, autoFitPadding);
     }, 160);
     return () => window.clearTimeout(timer);
-  }, [focus, graphData.nodes, focusNode, fitPadding]);
+  }, [focus, graphData.nodes, focusNode, autoFitPadding]);
 
   useEffect(() => {
     const controls = force.current?.controls?.();
@@ -269,70 +420,52 @@ export default function GraphCanvas({
     const timer = window.setTimeout(() => {
       const linkForce = force.current?.d3Force?.('link');
       linkForce?.distance?.((link: StarLink) =>
-        relationFamily(link) === 'citation' ? 48 : 56,
+        graphData.nodes.length <= 3
+          ? 92
+          : relationFamily(link) === 'citation'
+            ? 48
+            : 56,
       );
-      force.current?.d3Force?.('charge')?.strength?.(-88);
+      force.current
+        ?.d3Force?.('charge')
+        ?.strength?.(graphData.nodes.length <= 3 ? -140 : -88);
       force.current?.d3ReheatSimulation?.();
     }, 80);
     return () => window.clearTimeout(timer);
   }, [ForceGraph, graphData.nodes.length, graphData.links.length]);
 
-  function nodeId(value: string | StarNode) {
-    return typeof value === 'string' ? value : value.id;
-  }
-  function linkActive(link: StarLink) {
-    const source = nodeId(link.source),
-      target = nodeId(link.target);
-    return source === hovered || target === hovered || link.id === hovered;
-  }
-  function relationFamily(link: StarLink) {
-    if (link.type === '引用') return 'citation';
-    if (link.type === '实验数据集') return 'dataset';
-    if (
-      [
-        '使用方法',
-        '提出模块',
-        '研究领域',
-        '对比方法',
-        '直接 baseline',
-        '方法借鉴',
-        '技术关联',
-        '可借鉴方法',
-      ].includes(link.type)
-    )
-      return 'method';
-    return 'related';
-  }
   const nodeObject = useCallback(
     (node: StarNode) => {
       if (!SpriteText || !Three) return undefined;
       const selectedNode = node.id === selected;
+      const mutedNode = lensActive && !lens.nodeIds.has(node.id);
+      const compactLabel = size.width < 640;
       const group = new Three.Group();
       const geometry =
         node.kind === 'paper'
-          ? new Three.SphereGeometry(4.4, 28, 18)
+          ? new Three.SphereGeometry(4.4, 22, 14)
           : node.kind === 'method'
             ? new Three.OctahedronGeometry(5.1, 0)
             : node.kind === 'field'
               ? new Three.IcosahedronGeometry(4.8, 0)
-              : new Three.BoxGeometry(7.2, 7.2, 7.2, 2, 2, 2);
+              : new Three.BoxGeometry(7.2, 7.2, 7.2);
       const material = new Three.MeshPhysicalMaterial({
         color: colors[node.kind],
         emissive: colors[node.kind],
-        emissiveIntensity: selectedNode ? 0.42 : 0.14,
+        emissiveIntensity: mutedNode ? 0.02 : selectedNode ? 0.42 : 0.14,
         metalness: 0.18,
         roughness: 0.3,
         clearcoat: 0.72,
         clearcoatRoughness: 0.24,
         transparent: true,
-        opacity: 0.98,
+        opacity: mutedNode ? 0.16 : 0.98,
       });
       const mesh = new Three.Mesh(geometry, material);
       const baseScale = selectedNode ? 1.18 : 1;
       const phase = Math.abs(stableDepth(node.id)) * 0.73;
       mesh.scale.setScalar(baseScale);
       mesh.onBeforeRender = () => {
-        const pulse = effects
+        const pulse = effectsRef.current
           ? 1 +
             Math.sin(performance.now() / (selectedNode ? 720 : 1250) + phase) *
               (selectedNode ? 0.045 : 0.016)
@@ -348,7 +481,7 @@ export default function GraphCanvas({
           opacity: 0.72,
         });
         const ring = new Three.Mesh(
-          new Three.TorusGeometry(7.1, 0.13, 8, 64),
+          new Three.TorusGeometry(7.1, 0.13, 8, 36),
           ringMaterial,
         );
         const orbit = new Three.Group();
@@ -367,40 +500,210 @@ export default function GraphCanvas({
         orbit.rotation.y = 0.32;
         ring.onBeforeRender = () => {
           const time = performance.now();
-          ringMaterial.opacity = effects
+          ringMaterial.opacity = effectsRef.current
             ? 0.52 + Math.sin(time / 650) * 0.16
             : 0.72;
-          ring.scale.setScalar(effects ? 1 + Math.sin(time / 820) * 0.035 : 1);
-          orbit.rotation.z = effects ? time / 1850 : 0;
+          ring.scale.setScalar(
+            effectsRef.current ? 1 + Math.sin(time / 820) * 0.035 : 1,
+          );
+          orbit.rotation.z = effectsRef.current ? time / 1850 : 0;
         };
         group.add(ring);
         group.add(orbit);
       }
 
-      if (graphData.nodes.length <= 60 || selectedNode || node.id === focus) {
+      if (
+        !mutedNode &&
+        (labeledNodeIds.has(node.id) || selectedNode || node.id === focus)
+      ) {
         const shortLabel =
           node.label.length > 25 ? `${node.label.slice(0, 23)}…` : node.label;
-        const text = new SpriteText(`${symbols[node.kind]} ${shortLabel}`);
-        text.color = node.id === selected ? '#ffffff' : '#dce9ff';
-        text.textHeight = selectedNode ? 3.8 : 2.85;
+        const text = new SpriteText(
+          `${symbols[node.kind]} ${shortLabel}`,
+          selectedNode
+            ? compactLabel
+              ? 3.05
+              : 3.8
+            : compactLabel
+              ? 2.25
+              : 2.85,
+          node.id === selected ? '#ffffff' : '#dce9ff',
+        );
         text.backgroundColor = selectedNode
           ? 'rgba(10, 24, 49, .92)'
           : 'rgba(4, 11, 28, .30)';
         text.padding = selectedNode ? 1.5 : 0.78;
         text.borderRadius = 1.8;
-        text.strokeWidth = selectedNode ? 0 : 0.14;
-        text.strokeColor = '#020612';
+        if (!selectedNode) {
+          text.strokeWidth = 0.14;
+          text.strokeColor = '#020612';
+        }
         text.position.y = selectedNode ? -11.1 : -8.7;
         text.material.depthWrite = false;
         group.add(text);
       }
       return group;
     },
-    [SpriteText, Three, selected, effects, focus, graphData.nodes.length],
+    [
+      SpriteText,
+      Three,
+      selected,
+      focus,
+      labeledNodeIds,
+      lensActive,
+      lens.nodeIds,
+      size.width,
+    ],
   );
+  const linkObject = useCallback(
+    (link: StarLink) => {
+      if (!SpriteText || !Three) return undefined;
+      if (lensActive && !lens.edgeIds.has(link.id)) return new Three.Group();
+      const family = relationFamily(link);
+      const meta = relationMeta[family];
+      const sprite = new SpriteText(
+        relationBadge(link, focus),
+        size.width < 640 ? 1.45 : 2.05,
+        meta.color,
+      );
+      sprite.backgroundColor = meta.background;
+      sprite.padding = 0.82;
+      sprite.borderRadius = 1.5;
+      sprite.material.depthWrite = false;
+      return sprite;
+    },
+    [SpriteText, Three, focus, lensActive, lens.edgeIds, size.width],
+  );
+  const positionLinkLabel = useCallback(
+    (
+      sprite: { position: { set: (x: number, y: number, z: number) => void } },
+      {
+        start,
+        end,
+      }: {
+        start: { x: number; y: number; z: number };
+        end: { x: number; y: number; z: number };
+      },
+    ) => {
+      const dx = end.x - start.x;
+      const dy = end.y - start.y;
+      const planarLength = Math.hypot(dx, dy) || 1;
+      const labelOffset = 3.4;
+      sprite.position.set(
+        start.x + dx / 2 - (dy / planarLength) * labelOffset,
+        start.y + dy / 2 + (dx / planarLength) * labelOffset + 1,
+        start.z + (end.z - start.z) / 2,
+      );
+      return true;
+    },
+    [],
+  );
+  const linkHovered = useCallback((link: StarLink) => {
+    const source = nodeId(link.source);
+    const target = nodeId(link.target);
+    return (
+      link.id === hover.current.link ||
+      source === hover.current.node ||
+      target === hover.current.node
+    );
+  }, []);
+  const nodeTooltip = useCallback(
+    (node: StarNode) =>
+      `<b>${symbols[node.kind]} ${escape(node.label)}</b><br>${escape(kindNames[node.kind])}${node.year ? ` · ${node.year}` : ''}`,
+    [],
+  );
+  const linkTooltip = useCallback(
+    (link: StarLink) =>
+      `<b>${escape(link.type)}</b>${link.description ? `<br>${escape(link.description.slice(0, 120))}` : ''}`,
+    [],
+  );
+  const getLinkColor = useCallback(
+    (link: StarLink) => {
+      if (linkHovered(link)) return '#b8d7ff';
+      if (lensActive && !lens.edgeIds.has(link.id)) return '#132039';
+      return relationMeta[relationFamily(link)].color;
+    },
+    [lens.edgeIds, lensActive, linkHovered],
+  );
+  const getLinkWidth = useCallback(
+    (link: StarLink) => {
+      if (lensActive && !lens.edgeIds.has(link.id)) return 0.22;
+      if (lensActive && lens.edgeIds.has(link.id)) return 1.18;
+      const family = relationFamily(link);
+      if (family === 'method' || family === 'comparison') return 1.05;
+      if (family === 'dataset' || family === 'field') return 0.9;
+      return 0.62;
+    },
+    [lens.edgeIds, lensActive],
+  );
+  const getLinkCurvature = useCallback(
+    (link: StarLink) => (relationFamily(link) === 'related' ? 0.12 : 0),
+    [],
+  );
+  const getArrowLength = useCallback(
+    (link: StarLink) => {
+      if (lensActive && !lens.edgeIds.has(link.id)) return 0;
+      return relationFamily(link) === 'citation' ? 3.6 : 2.4;
+    },
+    [lens.edgeIds, lensActive],
+  );
+  const getParticleCount = useCallback(
+    (link: StarLink) => {
+      if (!effects || (lensActive && !lens.edgeIds.has(link.id))) return 0;
+      if (linkHovered(link)) return 4;
+      const center = focus || (lensActive ? selected : '');
+      if (
+        !center ||
+        ![nodeId(link.source), nodeId(link.target)].includes(center)
+      )
+        return 0;
+      return relationFamily(link) === 'citation' ? 2 : 1;
+    },
+    [effects, focus, lens.edgeIds, lensActive, linkHovered, selected],
+  );
+  const getParticleWidth = useCallback(
+    (link: StarLink) =>
+      linkHovered(link)
+        ? 2.2
+        : relationFamily(link) === 'citation'
+          ? 1.45
+          : 1.05,
+    [linkHovered],
+  );
+  const getParticleSpeed = useCallback(
+    (link: StarLink) =>
+      relationFamily(link) === 'citation'
+        ? 0.006
+        : relationFamily(link) === 'method'
+          ? 0.0025
+          : 0.0018,
+    [],
+  );
+  const getParticleColor = useCallback(
+    (link: StarLink) => relationMeta[relationFamily(link)].color,
+    [],
+  );
+  const refreshHover = useCallback((kind: 'node' | 'link', id = '') => {
+    const next =
+      kind === 'node' ? { node: id, link: '' } : { node: '', link: id };
+    if (hover.current.node === next.node && hover.current.link === next.link)
+      return;
+    hover.current = next;
+    force.current?.refresh?.();
+  }, []);
+  const fitLens = useCallback(() => {
+    setGuide(false);
+    if (selectedNode && lens.nodeIds.size <= 3) {
+      focusNode(selectedNode, 650);
+      return;
+    }
+    force.current?.zoomToFit?.(650, 68, (node: StarNode) =>
+      lens.nodeIds.has(node.id),
+    );
+  }, [focusNode, lens.nodeIds, selectedNode]);
   function fit() {
     setGuide(false);
-    force.current?.zoomToFit?.(800, fitPadding);
+    force.current?.zoomToFit?.(800, autoFitPadding);
   }
   async function fullScreen() {
     setGuide(false);
@@ -499,71 +802,24 @@ export default function GraphCanvas({
             backgroundColor="rgba(0,0,0,0)"
             controlType="orbit"
             showNavInfo={false}
-            nodeLabel={(node: StarNode) =>
-              `<b>${symbols[node.kind]} ${escape(node.label)}</b><br>${escape(kindNames[node.kind])}${node.year ? ` · ${node.year}` : ''}`
-            }
+            nodeLabel={nodeTooltip}
             nodeThreeObject={nodeObject}
-            linkColor={(link: StarLink) =>
-              linkActive(link)
-                ? '#8eb8ff'
-                : link.status === 'candidate'
-                  ? '#725c98'
-                  : link.status === 'manual'
-                    ? '#4f9e91'
-                    : '#30496f'
+            linkThreeObject={showRelationLabels ? linkObject : undefined}
+            linkThreeObjectExtend={showRelationLabels}
+            linkPositionUpdate={
+              showRelationLabels ? positionLinkLabel : undefined
             }
-            linkWidth={(link: StarLink) =>
-              linkActive(link)
-                ? 1.7
-                : relationFamily(link) === 'method'
-                  ? 1.05
-                  : relationFamily(link) === 'dataset'
-                    ? 0.9
-                    : 0.62
-            }
+            linkColor={getLinkColor}
+            linkWidth={getLinkWidth}
             linkOpacity={0.68}
-            linkCurvature={(link: StarLink) =>
-              relationFamily(link) === 'related' ? 0.12 : 0
-            }
-            linkDirectionalArrowLength={(link: StarLink) =>
-              relationFamily(link) === 'citation' ? 4.8 : 3.2
-            }
+            linkCurvature={getLinkCurvature}
+            linkDirectionalArrowLength={getArrowLength}
             linkDirectionalArrowRelPos={0.92}
-            linkDirectionalParticles={(link: StarLink) => {
-              if (!effects) return 0;
-              if (link.id === hovered) return 4;
-              if (relationFamily(link) === 'citation') return 2;
-              return focus &&
-                [nodeId(link.source), nodeId(link.target)].includes(focus)
-                ? 1
-                : 0;
-            }}
-            linkDirectionalParticleWidth={(link: StarLink) =>
-              link.id === hovered
-                ? 2.2
-                : relationFamily(link) === 'citation'
-                  ? 1.45
-                  : 1.05
-            }
-            linkDirectionalParticleSpeed={(link: StarLink) =>
-              relationFamily(link) === 'citation'
-                ? 0.006
-                : relationFamily(link) === 'method'
-                  ? 0.0025
-                  : 0.0018
-            }
-            linkDirectionalParticleColor={(link: StarLink) =>
-              relationFamily(link) === 'citation'
-                ? '#9bc4ff'
-                : relationFamily(link) === 'method'
-                  ? '#c7a3ff'
-                  : relationFamily(link) === 'dataset'
-                    ? '#ffd382'
-                    : '#72e0ca'
-            }
-            linkLabel={(link: StarLink) =>
-              `<b>${escape(link.type)}</b>${link.description ? `<br>${escape(link.description.slice(0, 120))}` : ''}`
-            }
+            linkDirectionalParticles={getParticleCount}
+            linkDirectionalParticleWidth={getParticleWidth}
+            linkDirectionalParticleSpeed={getParticleSpeed}
+            linkDirectionalParticleColor={getParticleColor}
+            linkLabel={linkTooltip}
             warmupTicks={120}
             cooldownTicks={110}
             d3AlphaDecay={0.025}
@@ -582,7 +838,7 @@ export default function GraphCanvas({
                 focusNode(graphData.nodes[0], 450);
                 return;
               }
-              force.current?.zoomToFit?.(650, fitPadding);
+              force.current?.zoomToFit?.(650, autoFitPadding);
             }}
             onNodeClick={(node: StarNode) => {
               setGuide(false);
@@ -590,7 +846,7 @@ export default function GraphCanvas({
               onSelect(node.id);
             }}
             onNodeHover={(node: StarNode | null) => {
-              setHovered(node?.id || '');
+              refreshHover('node', node?.id);
               if (canvas.current)
                 canvas.current.style.cursor = node
                   ? connecting
@@ -613,7 +869,11 @@ export default function GraphCanvas({
                 target: nodeId(link.target),
               });
             }}
-            onLinkHover={(link: StarLink | null) => setHovered(link?.id || '')}
+            onLinkHover={(link: StarLink | null) => {
+              refreshHover('link', link?.id);
+              if (canvas.current)
+                canvas.current.style.cursor = link ? 'pointer' : 'grab';
+            }}
             onBackgroundClick={() => setGuide(false)}
           />
         ) : loadError ? (
@@ -637,7 +897,45 @@ export default function GraphCanvas({
           起点已选中，请点击另一个星点建立关系
         </div>
       )}
-      {guide && graphData.nodes.length > 1 && (
+      {lensActive && selectedNode && (
+        <div className="relation-lens-card" aria-live="polite">
+          <div className="lens-card-heading">
+            <div>
+              <span>关系透镜</span>
+              <strong>{selectedNode.label}</strong>
+            </div>
+            <div className="lens-card-actions">
+              <button onClick={fitLens} title="定位一跳关系">
+                <Focus size={15} />
+                定位一跳
+              </button>
+              <button
+                className="lens-open"
+                onClick={onFocusSelected}
+                title="进入所选节点的关系网"
+              >
+                <Network size={15} />
+                打开关系网
+              </button>
+            </div>
+          </div>
+          <p>
+            {kindNames[selectedNode.kind]}
+            {selectedNode.year ? ` · ${selectedNode.year}` : ''} ·{' '}
+            {Math.max(0, lens.nodeIds.size - 1)} 个邻居 · {lens.edgeIds.size}{' '}
+            条直接关系
+          </p>
+          <div className="lens-counts">
+            {lensCounts.slice(0, 5).map(([family, count]) => (
+              <span key={family}>
+                {relationMeta[family].symbol} {relationMeta[family].label}{' '}
+                <b>{count}</b>
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
+      {guide && !lensActive && graphData.nodes.length > 1 && (
         <div className="star-guide">
           <button onClick={() => setGuide(false)} aria-label="关闭使用提示">
             ×
@@ -646,7 +944,7 @@ export default function GraphCanvas({
           <div>
             <strong>先看形状，再看连线</strong>
             <p>● 论文　◆ 方法　⬢ 领域　■ 数据集</p>
-            <p>点节点选中心 · 箭头看方向 · 右下角 ✨ 开关动态</p>
+            <p>线中标签说明关系 · 箭头看方向 · ✨ 开关动态</p>
           </div>
         </div>
       )}
@@ -678,8 +976,8 @@ export default function GraphCanvas({
         <span>{graphData.nodes.length} 个节点</span>
         <span>{graphData.links.length} 条关系</span>
         <span>
-          {hovered
-            ? '已高亮相邻关系'
+          {lensActive
+            ? `关系透镜 · ${Math.max(0, lens.nodeIds.size - 1)} 个邻居`
             : effects
               ? '流光沿关系方向移动'
               : '动态已关闭 · 箭头仍表示方向'}

@@ -554,6 +554,102 @@
   letter-spacing: 0.1px;
 }
 
+.relation-lens-card {
+  position: absolute;
+  z-index: 11;
+  bottom: 58px;
+  left: 24px;
+  width: min(390px, calc(100% - 48px));
+  padding: 12px 13px;
+  color: #b7cae6;
+  background:
+    linear-gradient(145deg, rgb(11 28 55 / 92%), rgb(8 18 37 / 91%)),
+    radial-gradient(circle at 12% 0%, rgb(98 136 255 / 22%), transparent 56%);
+  border: 1px solid rgb(116 154 219 / 28%);
+  border-radius: 13px;
+  box-shadow:
+    0 16px 38px rgb(0 0 0 / 34%),
+    inset 0 1px rgb(255 255 255 / 6%);
+  backdrop-filter: blur(18px);
+}
+.lens-card-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.lens-card-heading > div {
+  min-width: 0;
+}
+.lens-card-actions {
+  display: flex;
+  flex: 0 0 auto;
+  gap: 5px;
+}
+.lens-card-heading span {
+  display: block;
+  margin-bottom: 2px;
+  color: #7696c7;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+.lens-card-heading strong {
+  display: block;
+  overflow: hidden;
+  color: #f2f7ff;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.lens-card-heading button {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 5px;
+  padding: 6px 9px;
+  color: #d9e7ff;
+  font-size: 11px;
+  background: rgb(57 91 147 / 38%);
+  border: 1px solid rgb(121 161 225 / 25%);
+  border-radius: 8px;
+}
+.lens-card-heading button:hover {
+  background: rgb(67 105 167 / 56%);
+}
+.lens-card-heading button.lens-open {
+  color: #f4f7ff;
+  background: linear-gradient(
+    135deg,
+    rgb(59 100 170 / 78%),
+    rgb(82 64 151 / 76%)
+  );
+  border-color: rgb(141 167 239 / 34%);
+}
+.relation-lens-card > p {
+  margin: 7px 0 8px;
+  color: #829abb;
+  font-size: 11px;
+}
+.lens-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+.lens-counts span {
+  padding: 4px 7px;
+  color: #9fb6d7;
+  font-size: 10px;
+  background: rgb(25 47 80 / 62%);
+  border: 1px solid rgb(105 139 194 / 17%);
+  border-radius: 999px;
+}
+.lens-counts b {
+  margin-left: 2px;
+  color: #f1f6ff;
+}
+
 .star-legend {
   position: absolute;
   z-index: 9;
@@ -854,6 +950,27 @@
   }
   .star-guide p:last-child {
     display: none;
+  }
+  .relation-lens-card {
+    right: 12px;
+    bottom: 104px;
+    left: 12px;
+    width: auto;
+    padding: 10px 11px;
+  }
+  .lens-counts {
+    display: none;
+  }
+  .relation-lens-card > p {
+    margin-bottom: 0;
+  }
+  .lens-card-actions button:first-child {
+    width: 32px;
+    padding-right: 0;
+    padding-left: 0;
+    justify-content: center;
+    gap: 0;
+    font-size: 0;
   }
   .star-legend {
     bottom: 64px;

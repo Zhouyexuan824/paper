@@ -520,8 +520,14 @@ export default function Workspace() {
       setEdgeOpen(true);
       setConnecting(false);
       setDeletePending(false);
-    } else {
+    } else if (focus) {
       visit(id);
+    } else {
+      selectedRef.current = id;
+      setSelected(id);
+      setSuggestions([]);
+      setConnecting(false);
+      setDetailsOpen(true);
     }
   }
   async function move(id: string, x: number, y: number) {
@@ -965,8 +971,7 @@ export default function Workspace() {
                 variant="outline"
                 title="恢复所选节点的默认布局、缩放和分类显示，保留全部数据"
                 onClick={() => {
-                  setFocus(selected);
-                  setViewScope('insight');
+                  setViewScope(focus ? 'insight' : 'all');
                   setConnecting(false);
                   setFilter('');
                   setViewRevision((v) => v + 1);
@@ -1012,7 +1017,14 @@ export default function Workspace() {
               }}
               onMove={(id, x, y) => ready && move(id, x, y)}
               onConnect={() => ready && setConnecting((c) => !c)}
-              onReset={() => setFocus(null)}
+              onFocusSelected={() => {
+                setViewScope('insight');
+                setFocus(selected);
+              }}
+              onReset={() => {
+                setViewScope('all');
+                setFocus(null);
+              }}
             />
           ) : (
             <div className="personal-graph-loading" role="status">

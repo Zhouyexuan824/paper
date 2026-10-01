@@ -50,28 +50,46 @@ import ResearchBriefPanel from './research-brief';
 import type { RelationScope } from '@/lib/graph-view';
 import ExpansionResult, { type ExpansionReport } from './expansion-report';
 import PaperlineView from './paperline-view';
-async function request(path: string, body?: unknown, method = 'POST') {
-  const res = await fetch(
-    '/api/' + path,
-    body === undefined
-      ? { cache: 'no-store' }
-      : {
-          method,
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(body),
+async function request(
+  path: string,
+  body?: unknown,
+  method = 'POST',
+  timeoutMs = 0,
+) {
+  const controller = timeoutMs ? new AbortController() : undefined;
+  const timer = controller
+    ? window.setTimeout(() => controller.abort(), timeoutMs)
+    : undefined;
+  try {
+    const res = await fetch(
+      '/api/' + path,
+      body === undefined
+        ? { cache: 'no-store', signal: controller?.signal }
+        : {
+            method,
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+            signal: controller?.signal,
         },
-  );
-  const data: any = await res.json().catch(() => ({
-    error:
-      res.status === 504
-        ? '服务响应超时，请稍后重试。'
-        : '服务暂时无法响应，请稍后重试。',
-  }));
-  if (!res.ok)
-    throw Object.assign(new Error(data.error || '操作未完成，请重试。'), {
-      status: res.status,
-    });
-  return data;
+    );
+    const data: any = await res.json().catch(() => ({
+      error:
+        res.status === 504
+          ? '服务响应超时，请稍后重试。'
+          : '服务暂时无法响应，请稍后重试。',
+    }));
+    if (!res.ok)
+      throw Object.assign(new Error(data.error || '操作未完成，请重试。'), {
+        status: res.status,
+      });
+    return data;
+  } catch (error) {
+    if (controller?.signal.aborted)
+      throw new Error('读取个人图谱超时，请重试。');
+    throw error;
+  } finally {
+    if (timer) window.clearTimeout(timer);
+  }
 }
 const statusLabel = {
   verified: '来源支持',
@@ -158,6 +176,8 @@ export default function Workspace() {
   selectedRef.current = selected;
   const [login, setLogin] = useState(false),
     [ready, setReady] = useState(false),
+    [graphLoading, setGraphLoading] = useState(true),
+    [graphLoadError, setGraphLoadError] = useState(''),
     [ai, setAi] = useState(false),
     [aiProvider, setAiProvider] = useState(''),
     [busy, setBusy] = useState(''),
@@ -213,8 +233,31 @@ export default function Workspace() {
     setFailure(error);
   }, []);
   async function reload() {
+    setGraphLoading(true);
+    setGraphLoadError('');
     try {
-      const data = await request('graph');
+      const data = await request('graph', undefined, 'GET', 12000);
+      if (
+        !data ||
+        !Array.isArray(data.nodes) ||
+        !Array.isArray(data.edges) ||
+        data.nodes.some(
+          (item: unknown) =>
+            !item ||
+            typeof item !== 'object' ||
+            typeof (item as PaperNode).id !== 'string' ||
+            typeof (item as PaperNode).label !== 'string',
+        ) ||
+        data.edges.some(
+          (item: unknown) =>
+            !item ||
+            typeof item !== 'object' ||
+            typeof (item as GraphEdge).id !== 'string' ||
+            typeof (item as GraphEdge).source !== 'string' ||
+            typeof (item as GraphEdge).target !== 'string',
+        )
+      )
+        throw new Error('个人图谱返回的数据格式不正确。');
       setGraph(data);
       const ids = new Set<string>(data.nodes.map((item: PaperNode) => item.id));
       if (!ids.has(selectedRef.current)) {
@@ -229,7 +272,11 @@ export default function Workspace() {
       setLogin(false);
     } catch (e: any) {
       setLogin(e.status === 401);
+      setReady(false);
+      setGraphLoadError(e.message);
       notify(e.message, true);
+    } finally {
+      setGraphLoading(false);
     }
   }
   useEffect(() => {
@@ -853,15 +900,19 @@ export default function Workspace() {
             <div>
               <div className="eyebrow">RESEARCH CONSTELLATION</div>
               <h1>
-                {!ready
+                {graphLoading
                   ? '正在载入你的论文星图'
+                  : !ready
+                    ? '示例论文星图'
                   : focus
                   ? (graph.nodes.find((n) => n.id === focus)?.label || '论文') +
                     ' 的关系网'
                   : '全部研究关系'}
                 <span>
-                  {!ready ? (
+                  {graphLoading ? (
                     '正在读取已保存的论文、关系和笔记…'
+                  ) : !ready ? (
+                    '可浏览示例关系；登录后保存自己的论文、连线和笔记。'
                   ) : (
                     <>
                       {focus
@@ -944,7 +995,7 @@ export default function Workspace() {
               </Button>
             </div>
           </div>
-          {ready ? (
+          {!graphLoading ? (
             <GraphCanvas
               key={viewRevision}
               graph={graph}
@@ -952,13 +1003,14 @@ export default function Workspace() {
               selected={selected}
               focus={focus}
               connecting={connecting}
+              editable={ready}
               onSelect={choose}
               onEdge={(e) => {
                 setEdgeDraft({ ...e });
                 setEdgeOpen(true);
                 setDeletePending(false);
               }}
-              onMove={move}
+              onMove={(id, x, y) => ready && move(id, x, y)}
               onConnect={() => ready && setConnecting((c) => !c)}
               onReset={() => setFocus(null)}
             />
@@ -967,6 +1019,15 @@ export default function Workspace() {
               <LoaderCircle className="spin" />
               <strong>正在载入你的论文星图</strong>
               <span>正在读取已保存的论文、关系和笔记…</span>
+            </div>
+          )}
+          {!graphLoading && graphLoadError && !login && (
+            <div className="graph-load-notice" role="alert">
+              <div>
+                <strong>个人图谱暂时没有载入</strong>
+                <span>{graphLoadError} 当前先显示示例星图。</span>
+              </div>
+              <button onClick={() => void reload()}>重新读取</button>
             </div>
           )}
         </main>

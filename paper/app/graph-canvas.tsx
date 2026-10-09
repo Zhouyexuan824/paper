@@ -3,6 +3,7 @@
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -176,6 +177,312 @@ const relationBadge = (link: StarLink, focus: string | null) => {
   return `${statusMark === symbol ? symbol : `${statusMark} ${symbol}`} ${label}`;
 };
 
+type TreeEntry = { node: StarNode; relations: string[] };
+
+function RelationshipTree({
+  nodes,
+  links,
+  centerId,
+  width: viewportWidth,
+  onSelect,
+  onEdge,
+  onNavigate,
+}: {
+  nodes: StarNode[];
+  links: StarLink[];
+  centerId: string;
+  width: number;
+  onSelect: (id: string) => void;
+  onEdge: (edge: GraphEdge) => void;
+  onNavigate: (scope: RelationScope) => void;
+}) {
+  const center = nodes.find((node) => node.id === centerId)!;
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const {
+    methods,
+    related,
+    references,
+    followups,
+    followupCount,
+    linksByNode,
+  } = useMemo(() => {
+    const byId = new Map(nodes.map((node) => [node.id, node]));
+    const groups = {
+      methods: new Map<string, TreeEntry>(),
+      related: new Map<string, TreeEntry>(),
+      references: new Map<string, TreeEntry>(),
+      followups: new Map<string, TreeEntry>(),
+    };
+    const edgesByNode = new Map<string, GraphEdge[]>();
+    const methodRelations = new Set([
+      '使用方法',
+      '提出模块',
+      '研究领域',
+      '方法借鉴',
+      '技术关联',
+      '可借鉴方法',
+    ]);
+    const add = (
+      group: Map<string, TreeEntry>,
+      node: StarNode,
+      edge: StarLink,
+    ) => {
+      const entry = group.get(node.id) || { node, relations: [] };
+      if (!entry.relations.includes(edge.type)) entry.relations.push(edge.type);
+      group.set(node.id, entry);
+    };
+    for (const edge of links) {
+      if (edge.source !== centerId && edge.target !== centerId) continue;
+      const neighborId = edge.source === centerId ? edge.target : edge.source;
+      const neighbor = byId.get(neighborId);
+      if (!neighbor || neighbor.kind === 'dataset') continue;
+      const edgeRecord: GraphEdge = {
+        ...edge,
+        source: nodeId(edge.source),
+        target: nodeId(edge.target),
+      };
+      edgesByNode.set(neighborId, [
+        ...(edgesByNode.get(neighborId) || []),
+        edgeRecord,
+      ]);
+      if (edge.type === '引用') {
+        if (edge.source === centerId) add(groups.references, neighbor, edge);
+        else add(groups.followups, neighbor, edge);
+        continue;
+      }
+      if (edge.type === '后续工作候选') {
+        add(groups.followups, neighbor, edge);
+        continue;
+      }
+      if (
+        neighbor.kind === 'method' ||
+        neighbor.kind === 'field' ||
+        methodRelations.has(edge.type)
+      ) {
+        add(groups.methods, neighbor, edge);
+        continue;
+      }
+      if (neighbor.kind === 'paper') add(groups.related, neighbor, edge);
+    }
+    const sort = (group: Map<string, TreeEntry>) => [...group.values()];
+    const byImportance = (a: TreeEntry, b: TreeEntry) =>
+      (b.node.citedBy || 0) - (a.node.citedBy || 0) ||
+      a.node.label.localeCompare(b.node.label);
+    const allFollowups = sort(groups.followups).sort(byImportance);
+    return {
+      methods: sort(groups.methods),
+      related: sort(groups.related).sort(byImportance).slice(0, 2),
+      references: sort(groups.references).sort(byImportance).slice(0, 2),
+      followups: allFollowups.slice(0, 4),
+      followupCount: allFollowups.length,
+      linksByNode: edgesByNode,
+    };
+  }, [centerId, links, nodes]);
+
+  const middleCount = related.length + 1;
+  const middleCenterIndex = Math.floor(middleCount / 2);
+  const middle: TreeEntry[] = [];
+  let relatedIndex = 0;
+  for (let index = 0; index < middleCount; index += 1)
+    middle.push(
+      index === middleCenterIndex
+        ? { node: center, relations: [] }
+        : related[relatedIndex++],
+    );
+
+  const maxRowCount = Math.max(
+    middle.length,
+    references.length,
+    followups.length,
+    1,
+  );
+  const cardWidth = viewportWidth < 840 ? 150 : 176;
+  const treeWidth = Math.min(
+    1240,
+    Math.max(viewportWidth - 24, maxRowCount * (cardWidth + 20) + 48, 680),
+  );
+  const treeHeight = 740;
+  const referenceY = 146;
+  const middleY = 344;
+  const bottomY = 570;
+  const centers = (count: number) =>
+    Array.from(
+      { length: count },
+      (_, index) => (treeWidth / (count + 1)) * (index + 1),
+    );
+  const referenceX = centers(references.length);
+  const middleX = centers(middle.length);
+  const followupX = centers(followups.length);
+  const centerX = middleX[middleCenterIndex];
+  useLayoutEffect(() => {
+    if (!scrollRef.current) return;
+    scrollRef.current.scrollLeft = Math.max(
+      0,
+      centerX - scrollRef.current.clientWidth / 2,
+    );
+  }, [centerX, treeWidth, viewportWidth]);
+  const edgeFor = (id: string, predicate: (edge: GraphEdge) => boolean) =>
+    linksByNode.get(id)?.find(predicate);
+
+  const lines = [
+    ...references.map((entry, index) => ({
+      id: `reference-${entry.node.id}`,
+      edge: edgeFor(entry.node.id, (edge) => edge.type === '引用' && edge.source === center.id),
+      d: `M ${centerX} ${middleY} V ${middleY - 36} H ${referenceX[index]} V ${referenceY + 94}`,
+    })),
+    ...related.map((entry) => {
+      const index = middle.findIndex((item) => item.node.id === entry.node.id);
+      const x = middleX[index];
+      const edge = edgeFor(entry.node.id, (item) => item.type !== '引用' && item.type !== '后续工作候选');
+      const sourceX = edge?.source === center.id ? centerX : x;
+      const targetX = edge?.target === center.id ? centerX : x;
+      const direction = Math.sign(targetX - sourceX) || 1;
+      const start = sourceX + direction * (cardWidth / 2);
+      const end = targetX - direction * (cardWidth / 2);
+      return {
+        id: `related-${entry.node.id}`,
+        edge,
+        d: `M ${start} ${middleY + 56} H ${end}`,
+      };
+    }),
+    ...followups.map((entry, index) => {
+      const edge = edgeFor(entry.node.id, (item) =>
+        (item.type === '引用' && item.target === center.id) || item.type === '后续工作候选',
+      );
+      const candidateFlowsDown = edge?.source === center.id;
+      return {
+        id: `followup-${entry.node.id}`,
+        edge,
+        d: candidateFlowsDown
+          ? `M ${centerX} ${middleY + 112} V ${middleY + 150} H ${followupX[index]} V ${bottomY}`
+          : `M ${followupX[index]} ${bottomY} V ${middleY + 150} H ${centerX} V ${middleY + 112}`,
+      };
+    }),
+  ];
+
+  const nodeCard = (
+    entry: TreeEntry,
+    x: number,
+    y: number,
+    className = '',
+    isCenter = false,
+  ) => (
+    <article
+      key={entry.node.id}
+      className={`tree-node ${className}`}
+      style={{ left: x - cardWidth / 2, top: y }}
+      tabIndex={isCenter ? 0 : undefined}
+    >
+      {isCenter ? (
+        <>
+          <div className="tree-node-kind">检索论文 · 中心</div>
+          <strong title={entry.node.title}>{entry.node.label}</strong>
+          <div className="tree-node-actions" aria-label="中心论文关系视图">
+            <button onClick={() => onNavigate('datasets')}>数据集</button>
+          </div>
+        </>
+      ) : (
+        <button
+          className="tree-node-open"
+          onClick={() => onSelect(entry.node.id)}
+          title={entry.node.title}
+        >
+          <span className="tree-node-kind">
+            {kindNames[entry.node.kind]}
+            {entry.node.year ? ` · ${entry.node.year}` : ''}
+          </span>
+          <strong>{entry.node.label}</strong>
+          <span className="tree-node-relations">
+            {entry.relations.join(' · ')}
+          </span>
+        </button>
+      )}
+    </article>
+  );
+
+  return (
+    <div ref={scrollRef} className="relationship-tree-scroll">
+      <div
+        className="relationship-tree"
+        style={{ width: treeWidth, height: treeHeight }}
+      >
+        <svg
+          className="relationship-tree-lines"
+          width={treeWidth}
+          height={treeHeight}
+          aria-label="论文关系连线"
+        >
+          <defs>
+            <marker id="tree-arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+              <path d="M 0 0 L 10 5 L 0 10 z" fill="currentColor" />
+            </marker>
+          </defs>
+          {lines.map(
+            (line) =>
+              line.edge && (
+                <path
+                  key={line.id}
+                  d={line.d}
+                  className="relationship-tree-line"
+                  markerEnd="url(#tree-arrow)"
+                  onClick={() => onEdge(line.edge!)}
+                  aria-label={`编辑关系：${line.edge.type}`}
+                />
+              ),
+          )}
+        </svg>
+        <div className="tree-annotations" aria-label="方法与研究领域">
+          <span className="tree-annotation-title">方法与领域</span>
+          {methods.map((entry) => (
+            <span className={`tree-annotation ${entry.node.kind === 'field' ? 'field' : 'method'}`} key={entry.node.id} title={entry.node.title}>
+              {entry.node.label}
+            </span>
+          ))}
+        </div>
+        <div className="tree-tier-heading" style={{ top: 107 }}>
+          <span className="tree-tier-label">重要参考文献</span>
+          <button onClick={() => onNavigate('references')}>更多参考文献 →</button>
+        </div>
+        {references.map((entry, index) =>
+          nodeCard(entry, referenceX[index], referenceY, 'tree-node-reference'),
+        )}
+        {!references.length && (
+          <div className="tree-empty-row" style={{ top: referenceY + 34 }}>
+            尚未载入参考文献
+          </div>
+        )}
+        <div className="tree-tier-heading" style={{ top: 305 }}>
+          <span className="tree-tier-label">检索论文与相关论文</span>
+          <button onClick={() => onNavigate('related')}>更多相关论文 →</button>
+        </div>
+        {middle.map((entry, index) =>
+          nodeCard(
+            entry,
+            middleX[index],
+            middleY + (entry.node.id === center.id ? 0 : 9),
+            entry.node.id === center.id
+              ? 'tree-node-center'
+              : 'tree-node-related',
+            entry.node.id === center.id,
+          ),
+        )}
+        <div className="tree-tier-heading" style={{ top: 530 }}>
+          <span className="tree-tier-label">后续研究 · 引用当前论文的工作</span>
+          <button onClick={() => onNavigate('citations')}>更多后续研究 →</button>
+        </div>
+        {followups.map((entry, index) =>
+          nodeCard(entry, followupX[index], bottomY, 'tree-node-followup'),
+        )}
+        {!methods.length && !related.length && !references.length && !followupCount && (
+          <div className="tree-no-relations">
+            当前论文还没有已载入的方法、相关论文或后续研究关系。
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export default function GraphCanvas({
   graph,
   selected,
@@ -189,6 +496,12 @@ export default function GraphCanvas({
   onConnect,
   onFocusSelected,
   onReset,
+  onScopeChange,
+  loadingReferences,
+  loadingCitations,
+  citationState,
+  citationCount,
+  onRetryCitations,
 }: {
   graph: Graph;
   selected: string;
@@ -202,6 +515,12 @@ export default function GraphCanvas({
   onConnect: () => void;
   onFocusSelected: () => void;
   onReset: () => void;
+  onScopeChange: (scope: RelationScope) => void | Promise<void>;
+  loadingReferences: boolean;
+  loadingCitations: boolean;
+  citationState?: string;
+  citationCount?: number;
+  onRetryCitations: () => void;
 }) {
   const shell = useRef<HTMLDivElement>(null);
   const canvas = useRef<HTMLDivElement>(null);
@@ -279,8 +598,9 @@ export default function GraphCanvas({
   }, [effects]);
 
   useEffect(() => {
-    setLimit(42);
-    setScope(focus ? preferredScope : 'all');
+    const nextScope = focus ? preferredScope : 'all';
+    setLimit(nextScope === 'references' ? 5 : 42);
+    setScope(nextScope);
   }, [focus, researchStamp, preferredScope]);
 
   const visible = useMemo(
@@ -342,6 +662,10 @@ export default function GraphCanvas({
   const showRelationLabels =
     labeledLinkCount > 0 && labeledLinkCount <= relationLabelBudget;
   const selectedNode = graphData.nodes.find((node) => node.id === selected);
+  const treeCenter =
+    (selectedNode?.kind === 'paper' && selectedNode) ||
+    graphData.nodes.find((node) => node.id === focus && node.kind === 'paper') ||
+    graphData.nodes.find((node) => node.kind === 'paper');
   const lensCounts = [...lens.counts.entries()].sort((a, b) => b[1] - a[1]);
   const labeledNodeIds = useMemo(() => {
     const budget = size.width < 640 ? 14 : 30;
@@ -714,7 +1038,7 @@ export default function GraphCanvas({
   return (
     <div
       ref={shell}
-      className={`graph-stage star-stage ${connecting ? 'connecting' : ''} ${effects ? 'motion-on' : 'motion-off'}`}
+      className={`graph-stage star-stage ${scope === 'all' && treeCenter ? 'tree-mode' : ''} ${connecting ? 'connecting' : ''} ${effects ? 'motion-on' : 'motion-off'}`}
       onPointerMove={(event) => {
         const bounds = shell.current?.getBoundingClientRect();
         if (!bounds || !shell.current) return;
@@ -748,7 +1072,11 @@ export default function GraphCanvas({
                 <button
                   key={key}
                   aria-pressed={scope === key}
-                  onClick={() => setScope(key)}
+                  onClick={() => {
+                    setScope(key);
+                    setLimit(key === 'references' ? 5 : 42);
+                    void onScopeChange(key);
+                  }}
                 >
                   <ScopeIcon size={14} />
                   <span>{label}</span>
@@ -792,7 +1120,25 @@ export default function GraphCanvas({
       </div>
 
       <div ref={canvas} className="star-canvas">
-        {ForceGraph && Three && SpriteText ? (
+        {scope === 'all' && treeCenter ? (
+          <RelationshipTree
+            nodes={graphData.nodes}
+            links={graphData.links}
+            centerId={treeCenter.id}
+            width={size.width}
+            onSelect={onSelect}
+            onEdge={onEdge}
+            onNavigate={(nextScope) => {
+              setScope(nextScope);
+              setLimit(nextScope === 'references' ? 5 : 42);
+              void onScopeChange(nextScope);
+            }}
+          />
+        ) : scope === 'all' ? (
+          <div className="relationship-tree-no-center">
+            请选择一篇论文作为关系树中心。
+          </div>
+        ) : ForceGraph && Three && SpriteText ? (
           <ForceGraph
             ref={force}
             width={size.width}
@@ -935,7 +1281,7 @@ export default function GraphCanvas({
           </div>
         </div>
       )}
-      {guide && !lensActive && graphData.nodes.length > 1 && (
+      {guide && scope !== 'all' && !lensActive && graphData.nodes.length > 1 && (
         <div className="star-guide">
           <button onClick={() => setGuide(false)} aria-label="关闭使用提示">
             ×
@@ -951,16 +1297,36 @@ export default function GraphCanvas({
       {graphData.nodes.length <= (focus ? 1 : 0) && (
         <div className="graph-empty star-empty">
           <strong>这里还没有可见关系</strong>
-          <span>清除筛选，或在右侧点击“以此节点为中心”生成研究星图。</span>
-          <button
-            onClick={() => {
-              setScope('all');
-              setConfirmed(false);
-              setHidden([]);
-            }}
-          >
-            清除筛选
-          </button>
+          <span>
+            {scope === 'references'
+              ? loadingReferences
+                ? '正在查询参考文献，完成后优先展示被引次数较高的前 5 篇。'
+                : '暂无已载入的参考文献。选择论文后会自动查询，也可在右侧重新展开。'
+              : scope === 'citations'
+                ? loadingCitations
+                  ? '正在查询引用当前论文的后续工作…'
+                  : citationState === 'failed'
+                    ? '上次查询被引用来源失败，可能是数据源限流。可以稍后重试。'
+                    : citationState === 'ok' && citationCount === 0
+                      ? '当前数据源暂未返回被引用论文，可以重新查询。'
+                      : '暂无已载入的被引用论文。点击下方按钮查询引用当前论文的后续工作。'
+              : '清除筛选，或在右侧点击“以此节点为中心”生成研究星图。'}
+          </span>
+          {scope === 'citations' ? (
+            <button onClick={onRetryCitations} disabled={loadingCitations}>
+              重新查询被引用论文
+            </button>
+          ) : (
+            <button
+              onClick={() => {
+                setScope('all');
+                setConfirmed(false);
+                setHidden([]);
+              }}
+            >
+              清除筛选
+            </button>
+          )}
         </div>
       )}
       {visible.omitted > 0 && (
@@ -976,14 +1342,16 @@ export default function GraphCanvas({
         <span>{graphData.nodes.length} 个节点</span>
         <span>{graphData.links.length} 条关系</span>
         <span>
-          {lensActive
+          {scope === 'all'
+            ? '关系树 · 悬浮中心论文可切换视图'
+            : lensActive
             ? `关系透镜 · ${Math.max(0, lens.nodeIds.size - 1)} 个邻居`
             : effects
               ? '流光沿关系方向移动'
               : '动态已关闭 · 箭头仍表示方向'}
         </span>
       </div>
-      <div className="star-tools">
+      {scope !== 'all' && <div className="star-tools">
         <Button
           variant={connecting ? 'secondary' : 'ghost'}
           size="icon"
@@ -1042,7 +1410,7 @@ export default function GraphCanvas({
             <RotateCcw />
           </Button>
         )}
-      </div>
+      </div>}
     </div>
   );
 }

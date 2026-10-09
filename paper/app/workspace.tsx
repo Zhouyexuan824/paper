@@ -16,9 +16,10 @@ import {
   ArrowRight,
   ArrowLeft,
   FileText,
-  RefreshCw,
   RotateCcw,
   Download,
+  MessageCircle,
+  Send,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
@@ -48,7 +49,7 @@ import {
 import GraphCanvas from './graph-canvas';
 import ResearchBriefPanel from './research-brief';
 import type { RelationScope } from '@/lib/graph-view';
-import ExpansionResult, { type ExpansionReport } from './expansion-report';
+import type { ExpansionReport } from './expansion-report';
 import PaperlineView from './paperline-view';
 async function request(
   path: string,
@@ -166,9 +167,6 @@ export default function Workspace() {
     [focus, setFocus] = useState<string | null>('arxiv:2505.23214');
   const [viewRevision, setViewRevision] = useState(0);
   const [viewScope, setViewScope] = useState<RelationScope>('insight');
-  const [researchGoals, setResearchGoals] = useState<Record<string, string>>(
-    {},
-  );
   const [trail, setTrail] = useState<string[]>([]);
   const [reports, setReports] = useState<Record<string, ExpansionReport>>({});
   const [elapsed, setElapsed] = useState(0);
@@ -183,6 +181,10 @@ export default function Workspace() {
     [busy, setBusy] = useState(''),
     [notice, setNotice] = useState(''),
     [failure, setFailure] = useState(false);
+  const [chatHistory, setChatHistory] = useState<Record<string, { role: 'user' | 'assistant'; content: string }[]>>({});
+  const [chatInput, setChatInput] = useState('');
+  const [asking, setAsking] = useState(false);
+  const [askError, setAskError] = useState('');
   const [searchOpen, setSearchOpen] = useState(false),
     [query, setQuery] = useState(''),
     [searching, setSearching] = useState(false),
@@ -227,6 +229,31 @@ export default function Workspace() {
   );
   const connected = graph.edges.filter(
     (e) => e.source === node?.id || e.target === node?.id,
+  );
+  const linkedNodes = connected.flatMap((edge) => {
+    const id = edge.source === node?.id ? edge.target : edge.source;
+    const other = graph.nodes.find((item) => item.id === id);
+    return other ? [{ edge, node: other }] : [];
+  });
+  const importantFirst = (a: (typeof linkedNodes)[number], b: (typeof linkedNodes)[number]) =>
+    (b.node.citedBy || 0) - (a.node.citedBy || 0) ||
+    a.node.label.localeCompare(b.node.label);
+  const paperReferences = linkedNodes
+    .filter(({ edge }) => edge.type === '引用' && edge.source === node?.id)
+    .sort(importantFirst);
+  const relatedPapers = linkedNodes
+    .filter(({ edge, node: other }) =>
+      other.kind === 'paper' &&
+      edge.type !== '引用' &&
+      edge.type !== '后续工作候选' &&
+      !['使用方法', '提出模块', '研究领域', '实验数据集'].includes(edge.type),
+    )
+    .sort(importantFirst);
+  const researchFields = linkedNodes.filter(
+    ({ edge, node: other }) => other.kind === 'field' || edge.type === '研究领域',
+  );
+  const linkedDatasets = linkedNodes.filter(
+    ({ edge, node: other }) => other.kind === 'dataset' || edge.type === '实验数据集',
   );
   const notify = useCallback((s: string, error = false) => {
     setNotice(s);
@@ -363,7 +390,7 @@ export default function Workspace() {
       setBusy('');
     }
   }
-  async function expand(id = selected) {
+  async function expand(id = selected, preserveScope = false) {
     if (busy) return;
     setBusy('正在从多个来源查询引用与相关论文…');
     try {
@@ -371,7 +398,7 @@ export default function Workspace() {
       commit(d.graph);
       if (selectedRef.current === id) {
         setFocus(id);
-        setViewScope('all');
+        if (!preserveScope) setViewScope('all');
       }
       setReports((old) => ({
         ...old,
@@ -409,13 +436,7 @@ export default function Workspace() {
       `正在以 ${label} 为中心：解读中心摘要、检索文献、对照摘要并生成阅读路线（约 1–3 分钟）…`,
     );
     try {
-      const d = await request('explore', {
-        id,
-        goal:
-          researchGoals[id] ??
-          graph.nodes.find((n) => n.id === id)?.research?.goal ??
-          '',
-      });
+      const d = await request('explore', { id });
       commit(d.graph);
       if (selectedRef.current === id) {
         setFocus(d.centerId);
@@ -450,38 +471,6 @@ export default function Workspace() {
       setBusy('');
     }
   }
-  async function sourceStatus() {
-    if (busy) return;
-    setBusy('正在检查论文数据源…');
-    try {
-      const sample =
-        selected === 'arxiv:2505.23214'
-          ? 'samamba'
-          : selected === 'arxiv:2312.00752'
-            ? 'mamba'
-            : 'sam2';
-      const d = await request('source-status?sample=' + sample);
-      const labels: Record<string, string> = {
-        references: '参考文献',
-        citations: '被引用',
-        related: '相关论文',
-      };
-      notify(
-        `${d.paper} 数据源检查：` +
-          Object.entries(d.sections)
-            .map(
-              ([k, v]: [string, any]) =>
-                `${labels[k]} ${v.state === 'failed' || v.state === 'unavailable' ? '暂不可用' : v.count + ' 篇'}`,
-            )
-            .join('；'),
-        d.warnings.length > 0,
-      );
-    } catch (e: any) {
-      notify(e.message, true);
-    } finally {
-      setBusy('');
-    }
-  }
   function visit(id: string) {
     const previous = selectedRef.current;
     if (previous !== id) setTrail((old) => [...old, previous].slice(-40));
@@ -492,6 +481,35 @@ export default function Workspace() {
     setSuggestions([]);
     setConnecting(false);
     setDetailsOpen(true);
+  }
+  async function askAboutPaper(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const question = chatInput.trim();
+    if (!question || asking || !node || node.kind !== 'paper') return;
+    setAsking(true);
+    setAskError('');
+    setChatInput('');
+    setChatHistory((old) => ({
+      ...old,
+      [node.id]: [...(old[node.id] || []), { role: 'user', content: question }],
+    }));
+    try {
+      const result = await request('ask', { id: node.id, question });
+      setChatHistory((old) => ({
+        ...old,
+        [node.id]: [...(old[node.id] || []), { role: 'assistant', content: result.answer }],
+      }));
+    } catch (error: any) {
+      setAskError(error.message || '问答暂时不可用，请重试。');
+      setChatInput(question);
+    } finally {
+      setAsking(false);
+    }
+  }
+  function showRelationScope(scope: RelationScope) {
+    setFocus(node.id);
+    setViewScope(scope);
+    setDetailsOpen(false);
   }
   function back() {
     const previous = trail.at(-1);
@@ -1025,6 +1043,45 @@ export default function Workspace() {
                 setViewScope('all');
                 setFocus(null);
               }}
+              onScopeChange={(scope) => {
+                if (scope !== 'references' && scope !== 'citations') return;
+                const center = graph.nodes.find((item) => item.id === selected);
+                if (!center || center.kind !== 'paper') return;
+                const hasRelations = graph.edges.some(
+                  (edge) =>
+                    edge.type === '引用' &&
+                    (scope === 'references'
+                      ? edge.source === center.id
+                      : edge.target === center.id),
+                );
+                const section =
+                  reports[center.id]?.mode === 'expand'
+                    ? reports[center.id]?.sections?.[scope]
+                    : undefined;
+                const needsRetry =
+                  !section ||
+                  section.state === 'failed' ||
+                  section.state === 'unavailable';
+                if (!hasRelations && needsRetry)
+                  return expand(center.id, true);
+              }}
+              onRetryCitations={() => void expand(selected, true)}
+              citationState={
+                reports[selected]?.mode === 'expand'
+                  ? reports[selected]?.sections?.citations?.state
+                  : undefined
+              }
+              citationCount={
+                reports[selected]?.mode === 'expand'
+                  ? reports[selected]?.sections?.citations?.count
+                  : undefined
+              }
+              loadingCitations={busy.startsWith(
+                '正在从多个来源查询引用',
+              )}
+              loadingReferences={busy.startsWith(
+                '正在从多个来源查询引用',
+              )}
             />
           ) : (
             <div className="personal-graph-loading" role="status">
@@ -1063,55 +1120,7 @@ export default function Workspace() {
                 查看原始来源
                 <ArrowUpRight size={16} />
               </External>
-              <label className="research-goal-input">
-                这次想研究什么？
-                <textarea
-                  maxLength={500}
-                  rows={2}
-                  placeholder="例如：找可替换模块、理解技术来源、找同任务的不同路线"
-                  value={researchGoals[node.id] ?? node.research?.goal ?? ''}
-                  onChange={(e) =>
-                    setResearchGoals((old) => ({
-                      ...old,
-                      [node.id]: e.target.value,
-                    }))
-                  }
-                />
-              </label>
-              <Button
-                className="expand-btn center-expand"
-                onClick={() => exploreCenter(node.id)}
-                disabled={!ready || !!busy || !ai}
-              >
-                <Sparkles />
-                以此节点为中心 · AI 扩展
-              </Button>
-              <p className="center-hint">
-                {ai
-                  ? '自动查找基础方法、平行工作和后续论文，并绘制到当前星图。'
-                  : 'AI 暂未连接，仍可展开引用或手动建立关系。'}
-              </p>
-              {node.kind === 'paper' ? (
-                <div className="detail-actions">
-                  <Button
-                    className="expand-btn"
-                    onClick={() => analyze()}
-                    disabled={!ready || !!busy || !ai}
-                  >
-                    <Sparkles />
-                    {node.analyzed ? '重新分析摘要' : 'AI 分析摘要'}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    className="expand-btn"
-                    onClick={() => expand()}
-                    disabled={!ready || !!busy}
-                  >
-                    <Network />
-                    展开引用与相关论文
-                  </Button>
-                </div>
-              ) : (
+              {node.kind !== 'paper' && (
                 <Button
                   className="expand-btn"
                   disabled={!ready}
@@ -1121,36 +1130,15 @@ export default function Workspace() {
                   查找对应论文
                 </Button>
               )}
-              <button
-                className="source-check"
-                onClick={() => sourceStatus()}
-                disabled={!!busy}
-              >
-                <RefreshCw size={13} />
-                检查示例数据源
-              </button>
-              {reports[node.id] && (
-                <ExpansionResult
-                  report={reports[node.id]}
-                  busy={!!busy}
-                  onRetry={() => {
-                    const mode = reports[node.id].mode;
-                    void (mode === 'explore'
-                      ? exploreCenter(node.id)
-                      : mode === 'expand'
-                        ? expand(node.id)
-                        : analyze(node.id));
-                  }}
-                />
-              )}
               <div className="divider" />
               <Tabs defaultValue="overview" key={node.id}>
                 <TabsList variant="line" className="detail-tabs">
-                  <TabsTrigger value="overview">概览</TabsTrigger>
+                  <TabsTrigger value="overview">详情分析</TabsTrigger>
                   <TabsTrigger value="relations">
                     关系 {connected.length}
                   </TabsTrigger>
                   <TabsTrigger value="notes">笔记</TabsTrigger>
+                  <TabsTrigger value="ai-chat">AI问答</TabsTrigger>
                 </TabsList>
                 <TabsContent value="overview">
                   <ResearchBriefPanel
@@ -1158,24 +1146,57 @@ export default function Workspace() {
                     graph={graph}
                     onVisit={visit}
                   />
-                  {!node.research && (
-                    <div className="research-empty">
-                      <strong>让图谱回答研究问题</strong>
-                      <p>
-                        点击“以此节点为中心 · AI 扩展”，获取这篇论文的技术路线、值得对照的论文及具体阅读问题。
-                      </p>
+                  {node.summary && <p className="summary">{node.summary}</p>}
+                  <div className="info-card paper-abstract-detail">
+                    <span>论文摘要</span>
+                    <p>{node.abstract || node.summary || '尚未收录摘要，可在信息编辑中补充。'}</p>
+                  </div>
+                  <div className="detail-relation-group">
+                    <div className="detail-relation-heading">
+                      <strong>研究领域</strong>
+                      <button onClick={() => showRelationScope('methods')}>在关系图查看 →</button>
                     </div>
-                  )}
-                  <p className="summary">
-                    {node.summary ||
-                      '点击 AI 分析摘要，提取方法、领域和数据集关系。'}
-                  </p>
-                  {node.abstract && (
-                    <details className="abstract-block">
-                      <summary>原始摘要</summary>
-                      <p>{node.abstract}</p>
-                    </details>
-                  )}
+                    {researchFields.length ? researchFields.slice(0, 3).map(({ node: item, edge }) => (
+                      <button className="detail-relation-item" key={edge.id} onClick={() => visit(item.id)}>
+                        <span>{item.label}</span><small>{edge.type}</small>
+                      </button>
+                    )) : <p className="detail-muted">{node.research?.problem || '暂未收录研究领域。'}</p>}
+                  </div>
+                  <div className="detail-relation-group">
+                    <div className="detail-relation-heading">
+                      <strong>数据集</strong>
+                      <button onClick={() => showRelationScope('datasets')}>在关系图查看 →</button>
+                    </div>
+                    {linkedDatasets.length ? linkedDatasets.slice(0, 3).map(({ node: item, edge }) => (
+                      <button className="detail-relation-item" key={edge.id} onClick={() => visit(item.id)}>
+                        <span>{item.label}</span><small>{edge.type}</small>
+                      </button>
+                    )) : <p className="detail-muted">{node.datasets || '暂未收录数据集。'}</p>}
+                  </div>
+                  <div className="detail-relation-group">
+                    <div className="detail-relation-heading">
+                      <strong>参考文献 <small>重要的 {Math.min(2, paperReferences.length)} / {paperReferences.length} 篇</small></strong>
+                      <button onClick={() => showRelationScope('references')}>更多 →</button>
+                    </div>
+                    {paperReferences.slice(0, 2).map(({ node: item, edge }) => (
+                      <button className="detail-relation-item" key={edge.id} onClick={() => visit(item.id)}>
+                        <span>{item.title}</span><small>{item.year || '年份未知'} · 被引 {item.citedBy || 0}</small>
+                      </button>
+                    ))}
+                    {!paperReferences.length && <p className="detail-muted">参考文献尚未载入，可打开关系图触发查询。</p>}
+                  </div>
+                  <div className="detail-relation-group">
+                    <div className="detail-relation-heading">
+                      <strong>相关论文 <small>重要的 {Math.min(2, relatedPapers.length)} / {relatedPapers.length} 篇</small></strong>
+                      <button onClick={() => showRelationScope('related')}>更多 →</button>
+                    </div>
+                    {relatedPapers.slice(0, 2).map(({ node: item, edge }) => (
+                      <button className="detail-relation-item" key={edge.id} onClick={() => visit(item.id)}>
+                        <span>{item.title}</span><small>{item.year || '年份未知'} · {edge.type}</small>
+                      </button>
+                    ))}
+                    {!relatedPapers.length && <p className="detail-muted">暂未收录相关论文。</p>}
+                  </div>
                   <div className="divider" />
                   <div className="section-label">关联与资源</div>
                   <External className="resource-card" href={node.code}>
@@ -1312,6 +1333,42 @@ export default function Workspace() {
                     <FileText />
                     编辑个人笔记
                   </Button>
+                </TabsContent>
+                <TabsContent value="ai-chat">
+                  <div className="paper-chat-intro">
+                    <MessageCircle size={18} />
+                    <div>
+                      <strong>围绕这篇论文提问</strong>
+                    </div>
+                  </div>
+                  {!ai && <p className="detail-muted">当前服务器尚未配置 AI 服务。配置后即可在这里提问。</p>}
+                  {node.kind !== 'paper' && <p className="detail-muted">请先选择一篇论文，再使用论文问答。</p>}
+                  <div className="paper-chat-messages" aria-live="polite">
+                    {(chatHistory[node.id] || []).map((message, index) => (
+                      <article key={`${node.id}-${index}`} className={`paper-chat-message ${message.role}`}>
+                        <small>{message.role === 'user' ? '你' : aiProvider || 'AI'}</small>
+                        <p>{message.content}</p>
+                      </article>
+                    ))}
+                    {asking && <div className="paper-chat-pending"><LoaderCircle className="spin" /> 正在根据论文信息生成回答…</div>}
+                  </div>
+                  {askError && <p className="inline-warning" role="alert">{askError}</p>}
+                  <form className="paper-chat-form" onSubmit={askAboutPaper}>
+                    <textarea
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      maxLength={2000}
+                      rows={3}
+                      placeholder="例如：这篇论文的核心贡献是什么？"
+                      aria-label="关于论文的问题"
+                      disabled={!ai || node.kind !== 'paper' || asking}
+                    />
+                    <Button type="submit" disabled={!ai || node.kind !== 'paper' || asking || !chatInput.trim()}>
+                      {asking ? <LoaderCircle className="spin" /> : <Send size={16} />}
+                      提问
+                    </Button>
+                  </form>
+                  <p className="evidence-note">问答会将论文题名、摘要及已收录的研究领域、数据集、实验信息和问题发送到服务器配置的 AI 服务；API 密钥保留在服务器端。</p>
                 </TabsContent>
               </Tabs>
             </>

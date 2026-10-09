@@ -70,8 +70,17 @@ export function graphView(
         '可借鉴方法',
       ].includes(e.type);
     if (scope === 'datasets') return e.type === '实验数据集';
-    if (scope === 'related')
-      return ['相关工作', '同任务方法', '后续工作候选'].includes(e.type);
+    if (scope === 'related') {
+      if (e.type === '引用') return false;
+      if (focus) {
+        const other = e.source === focus ? e.target : e.source;
+        return byId.get(other)?.kind === 'paper';
+      }
+      return (
+        byId.get(e.source)?.kind === 'paper' &&
+        byId.get(e.target)?.kind === 'paper'
+      );
+    }
     return true;
   });
   const ids = new Set(edges.flatMap((e) => [e.source, e.target]));
@@ -79,6 +88,7 @@ export function graphView(
     edges.filter(
       (e) => (e.source === id || e.target === id) && e.status !== 'candidate',
     ).length;
+  const citationImpact = (id: string) => byId.get(id)?.citedBy || 0;
   const candidates = graph.nodes
     .filter(
       (n) =>
@@ -88,18 +98,34 @@ export function graphView(
           : !hidden.includes(n.kind)),
     )
     .sort(
-      (a, b) =>
-        priority(b.id) - priority(a.id) ||
-        a.kind.localeCompare(b.kind) ||
-        a.label.localeCompare(b.label) ||
-        a.id.localeCompare(b.id),
+      (a, b) => {
+        if (scope === 'references') {
+          const impactOrder = citationImpact(b.id) - citationImpact(a.id);
+          if (impactOrder) return impactOrder;
+        }
+        return (
+          priority(b.id) - priority(a.id) ||
+          a.kind.localeCompare(b.kind) ||
+          a.label.localeCompare(b.label) ||
+          a.id.localeCompare(b.id)
+        );
+      },
     );
-  const total = candidates.length;
+  const scopedCandidates =
+    scope === 'methods'
+      ? candidates.filter(
+          (node) =>
+            node.id === focus ||
+            node.kind === 'method' ||
+            node.kind === 'field',
+        )
+      : candidates;
+  const total = scopedCandidates.length;
   const nodes = focus
-    ? [byId.get(focus), ...candidates.slice(0, limit)].filter(
+    ? [byId.get(focus), ...scopedCandidates.slice(0, limit)].filter(
         (n): n is Graph['nodes'][number] => !!n,
       )
-    : candidates;
+    : scopedCandidates;
   const shown = new Set(nodes.map((n) => n.id));
   edges = edges.filter((e) => shown.has(e.source) && shown.has(e.target));
   return {

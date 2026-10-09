@@ -380,6 +380,9 @@
   will-change: transform, opacity;
   animation: meteor-flight 13s linear infinite;
 }
+.graph-workspace .star-stage.tree-mode .ambient-meteor {
+  display: none;
+}
 .meteor-two {
   top: 42%;
   animation-delay: -5.2s;
@@ -406,6 +409,403 @@
 }
 .star-canvas canvas {
   display: block;
+}
+.relationship-tree-scroll {
+  position: absolute;
+  inset: 0;
+  overflow: auto;
+  padding: 8px 0 34px;
+  scrollbar-color: rgb(111 145 199 / 38%) transparent;
+}
+.relationship-tree {
+  position: relative;
+  margin: 0 auto;
+}
+.relationship-tree-lines {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  overflow: visible;
+  color: rgb(139 166 216 / 66%);
+}
+.relationship-tree-line {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.7;
+  vector-effect: non-scaling-stroke;
+  pointer-events: stroke;
+  cursor: pointer;
+  marker-end: url(#tree-arrow);
+  transition:
+    stroke 0.16s ease,
+    stroke-width 0.16s ease;
+}
+.tree-annotations {
+  position: absolute;
+  top: 14px;
+  left: 40px;
+  z-index: 4;
+  display: flex;
+  max-width: min(620px, calc(100% - 44px));
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 5px 8px;
+  color: #9eb1cf;
+  font-size: 10px;
+  line-height: 1.35;
+}
+.tree-annotation-title {
+  margin-right: 3px;
+  color: #8299bb;
+  letter-spacing: 0.04em;
+}
+.tree-annotation {
+  padding: 2px 5px;
+  color: #bbcae1;
+  background: rgb(21 34 58 / 64%);
+  border-radius: 4px;
+}
+.tree-annotation.method {
+  color: #cfb8f3;
+  background: rgb(54 41 83 / 65%);
+}
+.tree-annotation.field {
+  color: #91dfd1;
+  background: rgb(21 67 65 / 65%);
+}
+.relationship-tree-line:hover {
+  stroke: #c9b2ff;
+  stroke-width: 3;
+}
+.tree-tier-label {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  color: #90a8ce;
+  font-size: 12px;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+  transform: translateX(-50%);
+}
+.tree-tier-heading {
+  position: absolute;
+  right: 24px;
+  left: 24px;
+  z-index: 4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+.tree-tier-heading .tree-tier-label {
+  position: static;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transform: none;
+  white-space: nowrap;
+}
+.tree-tier-heading button {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  color: #b8caff;
+  font-size: 11px;
+  background: rgb(25 43 76 / 86%);
+  border: 1px solid rgb(117 151 213 / 28%);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.tree-tier-heading button:hover {
+  color: #fff;
+  background: #294777;
+}
+.tree-empty-row {
+  position: absolute;
+  left: 50%;
+  z-index: 2;
+  color: #7188ad;
+  font-size: 12px;
+  transform: translateX(-50%);
+  white-space: nowrap;
+}
+.tree-node {
+  position: absolute;
+  z-index: 3;
+  display: flex;
+  width: 176px;
+  min-height: 94px;
+  flex-direction: column;
+  justify-content: center;
+  gap: 7px;
+  padding: 12px 14px;
+  color: #e8efff;
+  background: linear-gradient(145deg, rgb(17 31 58 / 96%), rgb(10 19 38 / 96%));
+  border: 1px solid rgb(119 150 204 / 35%);
+  border-radius: 14px;
+  box-shadow:
+    0 12px 28px rgb(0 0 0 / 24%),
+    inset 0 1px rgb(255 255 255 / 5%);
+  text-align: center;
+  transition:
+    border-color 0.16s ease,
+    background 0.16s ease,
+    transform 0.16s ease;
+}
+.tree-node:hover,
+.tree-node:focus-within {
+  z-index: 5;
+  border-color: rgb(153 184 255 / 75%);
+  transform: translateY(-2px);
+}
+.tree-node-kind {
+  color: #8ea7cc;
+  font-size: 10px;
+}
+.tree-node strong {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+.tree-node-open {
+  display: flex;
+  width: 100%;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0;
+  color: inherit;
+  background: transparent;
+  border: 0;
+  cursor: pointer;
+}
+.tree-node-open:hover strong {
+  color: #fff;
+}
+.tree-node-relations {
+  overflow: hidden;
+  max-width: 100%;
+  color: #9aaed0;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tree-node-method {
+  border-color: rgb(177 139 245 / 40%);
+  background: linear-gradient(145deg, rgb(40 30 70 / 95%), rgb(15 20 42 / 96%));
+}
+.tree-node-related {
+  border-color: rgb(94 164 191 / 40%);
+}
+.tree-node-reference {
+  border-color: rgb(131 168 231 / 50%);
+  background: linear-gradient(145deg, rgb(27 46 80 / 96%), rgb(12 22 42 / 96%));
+}
+.tree-node-followup {
+  border-color: rgb(111 173 232 / 42%);
+  background: linear-gradient(145deg, rgb(19 43 73 / 96%), rgb(10 19 38 / 96%));
+}
+.tree-node-center {
+  min-height: 112px;
+  border-color: rgb(127 165 255 / 80%);
+  background: linear-gradient(145deg, rgb(36 66 123 / 98%), rgb(24 35 78 / 98%));
+  box-shadow:
+    0 0 28px rgb(90 128 255 / 24%),
+    0 15px 32px rgb(0 0 0 / 30%),
+    inset 0 1px rgb(255 255 255 / 10%);
+}
+.tree-node-center strong {
+  color: #fff;
+  font-size: 15px;
+}
+.tree-node-actions {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  display: flex;
+  gap: 6px;
+  padding: 6px;
+  background: rgb(7 15 31 / 96%);
+  border: 1px solid rgb(129 162 218 / 32%);
+  border-radius: 11px;
+  box-shadow: 0 10px 24px rgb(0 0 0 / 36%);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, -3px);
+  transition:
+    opacity 0.14s ease,
+    transform 0.14s ease;
+  white-space: nowrap;
+}
+.tree-node-center:hover .tree-node-actions,
+.tree-node-center:focus-within .tree-node-actions {
+  opacity: 1;
+  pointer-events: auto;
+  transform: translate(-50%, 0);
+}
+.tree-node-actions button {
+  padding: 6px 9px;
+  color: #c3d5f4;
+  font-size: 11px;
+  background: #14264a;
+  border: 1px solid rgb(125 158 215 / 25%);
+  border-radius: 7px;
+  cursor: pointer;
+}
+.tree-node-actions button:hover {
+  color: #fff;
+  background: #314f8b;
+}
+.tree-no-relations,
+.relationship-tree-no-center {
+  position: absolute;
+  top: 325px;
+  left: 50%;
+  width: min(420px, calc(100% - 32px));
+  color: #9eafca;
+  font-size: 13px;
+  line-height: 1.6;
+  text-align: center;
+  transform: translateX(-50%);
+}
+.detail-relation-group {
+  margin: 14px 0;
+  padding: 11px;
+  background: #f5f8fc;
+  border: 1px solid #e2eaf4;
+  border-radius: 11px;
+}
+.detail-relation-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 7px;
+  color: #263b58;
+  font-size: 13px;
+}
+.detail-relation-heading strong small {
+  margin-left: 4px;
+  color: #7b8da6;
+  font-size: 10px;
+  font-weight: 500;
+}
+.detail-relation-heading button {
+  flex: 0 0 auto;
+  padding: 0;
+  color: #456da8;
+  font-size: 11px;
+  background: none;
+  border: 0;
+  cursor: pointer;
+}
+.detail-relation-item {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 5px;
+  padding: 8px;
+  color: #293d59;
+  background: #fff;
+  border: 1px solid #e5ebf3;
+  border-radius: 8px;
+  text-align: left;
+  cursor: pointer;
+}
+.detail-relation-item:hover {
+  border-color: #9cb5d8;
+}
+.detail-relation-item span {
+  font-size: 12px;
+  line-height: 1.4;
+}
+.detail-relation-item small,
+.detail-muted {
+  color: #7e8ea4;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.detail-muted {
+  margin: 6px 0 0;
+}
+.paper-chat-intro {
+  display: flex;
+  gap: 10px;
+  margin: 10px 0 14px;
+  padding: 12px;
+  color: #365781;
+  background: #f2f7fd;
+  border-radius: 10px;
+}
+.paper-chat-intro strong {
+  font-size: 13px;
+}
+.paper-chat-intro p {
+  margin: 4px 0 0;
+  color: #75869c;
+  font-size: 11px;
+  line-height: 1.5;
+}
+.paper-chat-messages {
+  display: flex;
+  min-height: 115px;
+  max-height: 340px;
+  flex-direction: column;
+  gap: 9px;
+  overflow-y: auto;
+}
+.paper-chat-message {
+  max-width: 94%;
+  padding: 9px 11px;
+  background: #f2f5fa;
+  border-radius: 10px;
+}
+.paper-chat-message.user {
+  align-self: flex-end;
+  background: #e8f1ff;
+}
+.paper-chat-message small {
+  color: #6880a0;
+  font-size: 10px;
+}
+.paper-chat-message p {
+  margin: 4px 0 0;
+  color: #2b3e58;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+.paper-chat-pending {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  color: #7085a2;
+  font-size: 12px;
+}
+.paper-chat-form {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+  margin-top: 10px;
+}
+.paper-chat-form textarea {
+  width: 100%;
+  padding: 10px;
+  color: #263b58;
+  background: #fff;
+  border: 1px solid #d9e2ee;
+  border-radius: 9px;
+  resize: vertical;
+}
+.tree-no-relations {
+  top: 404px;
+}
+.relationship-tree-no-center {
+  top: 48%;
 }
 
 .star-toolbar {
